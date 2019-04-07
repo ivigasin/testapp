@@ -6,7 +6,7 @@
   "scripts": {
     "start": "npm run build:live",
     "build": "tsc -p .",
-    "build:live": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' index.ts"
+    "build:live": "nodemon --watch 'src/**/*.ts' --exec ts-node ./index.ts"
   },
   "repository": {
     "type": "git",
@@ -21,7 +21,6 @@
   "dependencies": {
     "@types/bluebird": "^3.5.26",
     "activedirectory2": "^1.2.7",
-    "bluebird": "^3.5.4",
     "body-parser": "^1.18.3",
     "dotenv": "^7.0.0",
     "dts-gen": "^0.5.7",
