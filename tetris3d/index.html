@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Тетрис в глубину</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #070b14;
+    --bg-2: #0e1526;
+    --grid: #26324f;
+    --grid-strong: #3b4c76;
+    --ink: #e4ebf8;
+    --ink-dim: #8a97b8;
+    --accent: #6cf0ff;
+    --danger: #ff5c7a;
+    --panel: rgba(14, 21, 38, 0.82);
+    --panel-line: rgba(108, 240, 255, 0.18);
+    --font-display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  html, body { height: 100%; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-display);
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+    touch-action: none;
+  }
+  #app {
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    padding-inline: 16px;
+    padding-block: 10px;
+    box-sizing: border-box;
+    gap: 8px;
+  }
+  header {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  header h1 {
+    margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  header .hint { color: var(--ink-dim); font-size: 12px; font-family: var(--font-mono); }
+  @media (max-width: 640px) { header .hint { display: none; } }
+
+  #stage {
+    position: relative; min-height: 0; min-width: 0;
+    display: grid; grid-template-columns: 1fr; place-items: center;
+  }
+  canvas#well {
+    display: block; width: 100%; height: 100%; max-width: 100%;
+    background: radial-gradient(ellipse at center, var(--bg-2) 0%, var(--bg) 70%);
+    border-radius: 6px;
+  }
+  .hud {
+    position: absolute; top: 10px; left: 10px;
+    display: grid; gap: 6px;
+    background: var(--panel); border: 1px solid var(--panel-line); border-radius: 6px;
+    padding: 10px 12px; min-width: 120px;
+    backdrop-filter: blur(4px);
+  }
+  .hud .row { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; }
+  .hud .lbl { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); }
+  .hud .val { font-family: var(--font-mono); font-weight: 600; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .next {
+    position: absolute; top: 10px; right: 10px;
+    background: var(--panel); border: 1px solid var(--panel-line); border-radius: 6px;
+    padding: 8px 10px; display: grid; gap: 4px; justify-items: center;
+    backdrop-filter: blur(4px);
+  }
+  .next .lbl { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); }
+  .next canvas { width: 84px; height: 72px; display: block; }
+  .layers {
+    position: absolute; right: 10px; bottom: 10px;
+    display: grid; gap: 3px; width: 64px;
+    background: var(--panel); border: 1px solid var(--panel-line); border-radius: 6px; padding: 8px;
+    backdrop-filter: blur(4px);
+  }
+  .layers .lbl { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 2px; text-align: center; }
+  .layers .bar { height: 6px; background: var(--grid); border-radius: 2px; overflow: hidden; }
+  .layers .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 120ms linear; }
+  .layers .bar.full i { background: #ffffff; }
+  @media (prefers-reduced-motion: reduce) { .layers .bar i { transition: none; } }
+
+  .overlay {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: rgba(7, 11, 20, 0.72); border-radius: 6px; backdrop-filter: blur(3px);
+  }
+  .overlay .card { text-align: center; display: grid; gap: 14px; padding: 24px; max-width: 420px; }
+  .overlay h2 { margin: 0; font-size: 28px; letter-spacing: 0.06em; text-transform: uppercase; text-wrap: balance; }
+  .overlay p { margin: 0; color: var(--ink-dim); font-size: 14px; line-height: 1.5; }
+  .overlay .final { font-family: var(--font-mono); font-size: 22px; color: var(--accent); }
+  .btn {
+    font: inherit; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+    background: var(--accent); color: #05131a; border: 0; border-radius: 4px;
+    padding: 12px 22px; cursor: pointer;
+  }
+  .btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+  #pad {
+    display: none;
+    grid-template-columns: repeat(4, 1fr); gap: 6px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (pointer: coarse) { #pad { display: grid; } }
+  #pad button {
+    font: inherit; font-size: 15px; font-weight: 700;
+    background: var(--bg-2); color: var(--ink); border: 1px solid var(--grid-strong); border-radius: 4px;
+    min-height: 46px; cursor: pointer;
+  }
+  #pad button:active { background: var(--grid-strong); }
+  #pad button.act { color: var(--accent); border-color: var(--accent); }
+  #pad button:focus-visible { outline: 2px solid var(--accent); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Тетрис в глубину</h1>
+    <div class="hint">← → ↑ ↓ двигать · Q/E ось Z · W/S ось X · A/D ось Y · Shift толкнуть · Пробел сбросить · P пауза</div>
+  </header>
+
+  <div id="stage">
+    <canvas id="well" aria-label="Игровая шахта"></canvas>
+    <div class="hud" aria-live="polite">
+      <div class="row"><span class="lbl">Счёт</span><span class="val" id="score">0</span></div>
+      <div class="row"><span class="lbl">Уровень</span><span class="val" id="level">1</span></div>
+      <div class="row"><span class="lbl">Слои</span><span class="val" id="lines">0</span></div>
+    </div>
+    <div class="next">
+      <span class="lbl">Следующая</span>
+      <canvas id="next" width="168" height="144"></canvas>
+    </div>
+    <div class="layers" id="layers"><div class="lbl">Слои ↓ вглубь</div></div>
+    <div class="overlay" id="overlay">
+      <div class="card">
+        <h2 id="ov-title">Тетрис в глубину</h2>
+        <p id="ov-text">Шахта 6 × 6 × 12. Фигуры летят от вас вглубь. Заполните слой целиком, чтобы он исчез. Игра окончена, когда фигуре некуда войти.</p>
+        <div class="final" id="ov-score" hidden></div>
+        <button class="btn" id="ov-btn">Играть</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pad">
+    <button data-k="rx">↻ X</button>
+    <button data-k="up">↑</button>
+    <button data-k="ry">↻ Y</button>
+    <button data-k="rz">↻ Z</button>
+    <button data-k="left">←</button>
+    <button data-k="down">↓</button>
+    <button data-k="right">→</button>
+    <button data-k="push" class="act">Толкнуть</button>
+    <button data-k="pause" style="grid-column: span 2">Пауза</button>
+    <button data-k="drop" class="act" style="grid-column: span 2">Сбросить</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  // ---- Well geometry: x,y = cross-section, z = depth (0 near the player, D-1 far wall)
+  const W = 6, H = 6, D = 12;
+  const CD = 4.2; // camera distance in front of the opening (cells)
+
+  const PIECES = [
+    { name: 'I',       h: 190, c: [[0,0,0],[1,0,0],[2,0,0],[3,0,0]] },
+    { name: 'O',       h:  48, c: [[0,0,0],[1,0,0],[0,1,0],[1,1,0]] },
+    { name: 'T',       h: 275, c: [[0,0,0],[1,0,0],[2,0,0],[1,1,0]] },
+    { name: 'L',       h:  28, c: [[0,0,0],[1,0,0],[2,0,0],[2,1,0]] },
+    { name: 'S',       h: 130, c: [[0,0,0],[1,0,0],[1,1,0],[2,1,0]] },
+    { name: 'Тренога', h: 340, c: [[0,0,0],[1,0,0],[0,1,0],[0,0,1]] },
+    { name: 'Винт П',  h: 225, c: [[0,0,0],[1,0,0],[1,1,0],[1,1,1]] },
+    { name: 'Винт Л',  h:  85, c: [[0,0,1],[1,0,1],[1,1,1],[1,1,0]] },
+  ];
+
+  // ---- State
+  let board, piece, next, score, level, lines, state, dropTimer, dropInterval, bag;
+  let clearing = null; // { layers: [z], until: ms }
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('well'), ctx = canvas.getContext('2d');
+  const nextCv = $('next'), nctx = nextCv.getContext('2d');
+  const overlay = $('overlay');
+
+  const emptyBoard = () => Array.from({ length: D }, () => Array.from({ length: H }, () => Array(W).fill(null)));
+
+  function refillBag() {
+    bag = PIECES.map((_, i) => i);
+    for (let i = bag.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [bag[i], bag[j]] = [bag[j], bag[i]]; }
+  }
+  function nextPiece() { if (!bag || !bag.length) refillBag(); return PIECES[bag.pop()]; }
+
+  const bbox = cells => {
+    const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (const c of cells) for (let i = 0; i < 3; i++) { mn[i] = Math.min(mn[i], c[i]); mx[i] = Math.max(mx[i], c[i]); }
+    return { mn, mx };
+  };
+  const normalize = cells => { const { mn } = bbox(cells); return cells.map(c => [c[0] - mn[0], c[1] - mn[1], c[2] - mn[2]]); };
+
+  function makePiece(def) {
+    const cells = normalize(def.c);
+    const { mx } = bbox(cells);
+    return { def, cells, x: Math.floor((W - mx[0] - 1) / 2), y: Math.floor((H - mx[1] - 1) / 2), z: 0 };
+  }
+
+  function collides(cells, px, py, pz) {
+    for (const [cx, cy, cz] of cells) {
+      const x = px + cx, y = py + cy, z = pz + cz;
+      if (x < 0 || x >= W || y < 0 || y >= H || z < 0 || z >= D) return true;
+      if (board[z][y][x]) return true;
+    }
+    return false;
+  }
+
+  function tryMove(dx, dy, dz) {
+    if (!collides(piece.cells, piece.x + dx, piece.y + dy, piece.z + dz)) { piece.x += dx; piece.y += dy; piece.z += dz; return true; }
+    return false;
+  }
+
+  const ROT = {
+    x: ([x, y, z]) => [x, -z, y],
+    y: ([x, y, z]) => [z, y, -x],
+    z: ([x, y, z]) => [-y, x, z],
+  };
+  function rotate(axis) {
+    const old = bbox(piece.cells);
+    const cx = piece.x + (old.mx[0] + 1) / 2, cy = piece.y + (old.mx[1] + 1) / 2, cz = piece.z + (old.mx[2] + 1) / 2;
+    const cells = normalize(piece.cells.map(ROT[axis]));
+    const nb = bbox(cells);
+    const bx = Math.round(cx - (nb.mx[0] + 1) / 2), by = Math.round(cy - (nb.mx[1] + 1) / 2);
+    let bz = Math.round(cz - (nb.mx[2] + 1) / 2);
+    if (bz < piece.z) bz = piece.z; // never rotate back toward the player past the current front
+    const kicks = [[0,0,0],[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[1,1,0],[-1,-1,0],[1,-1,0],[-1,1,0],[2,0,0],[-2,0,0],[0,2,0],[0,-2,0],[0,0,1]];
+    for (const [kx, ky, kz] of kicks) {
+      if (!collides(cells, bx + kx, by + ky, bz + kz)) { piece.cells = cells; piece.x = bx + kx; piece.y = by + ky; piece.z = bz + kz; return true; }
+    }
+    return false;
+  }
+
+  function landingZ() { let z = piece.z; while (!collides(piece.cells, piece.x, piece.y, z + 1)) z++; return z; }
+
+  function lock() {
+    for (const [cx, cy, cz] of piece.cells) board[piece.z + cz][piece.y + cy][piece.x + cx] = piece.def.h;
+    const full = [];
+    for (let z = 0; z < D; z++) if (board[z].every(row => row.every(v => v !== null))) full.push(z);
+    piece = null;
+    if (full.length) {
+      clearing = { layers: full, until: performance.now() + (reducedMotion ? 0 : 200) };
+    } else spawn();
+  }
+
+  function finishClear() {
+    const kept = [];
+    for (let z = D - 1; z >= 0; z--) if (!clearing.layers.includes(z)) kept.push(board[z]);
+    const nb = emptyBoard();
+    let w = D - 1;
+    for (const layer of kept) nb[w--] = layer;
+    board = nb;
+    const n = clearing.layers.length;
+    lines += n;
+    score += n * n * 100 * level;
+    level = 1 + Math.floor(lines / 5);
+    dropInterval = Math.max(140, 900 * Math.pow(0.85, level - 1));
+    clearing = null;
+    spawn();
+  }
+
+  function spawn() {
+    piece = makePiece(next);
+    next = nextPiece();
+    drawNext();
+    dropTimer = 0;
+    if (collides(piece.cells, piece.x, piece.y, piece.z)) { gameOver(); }
+    updateHud();
+  }
+
+  function gameOver() {
+    state = 'over';
+    $('ov-title').textContent = 'Шахта заполнена';
+    $('ov-text').textContent = 'Новой фигуре некуда войти. Игра окончена.';
+    $('ov-score').hidden = false; $('ov-score').textContent = 'Счёт ' + score;
+    $('ov-btn').textContent = 'Ещё раз';
+    overlay.hidden = false;
+  }
+
+  function start() {
+    board = emptyBoard(); score = 0; level = 1; lines = 0; dropInterval = 900; clearing = null; bag = null;
+    next = nextPiece();
+    state = 'play'; overlay.hidden = true;
+    spawn();
+    lastT = performance.now();
+  }
+
+  function togglePause() {
+    if (state === 'play') {
+      state = 'pause';
+      $('ov-title').textContent = 'Пауза'; $('ov-text').textContent = 'Фигура ждёт.'; $('ov-score').hidden = true;
+      $('ov-btn').textContent = 'Продолжить'; overlay.hidden = false;
+    } else if (state === 'pause') { state = 'play'; overlay.hidden = true; lastT = performance.now(); }
+  }
+
+  function hardDrop() { const z = landingZ(); score += (z - piece.z) * 2; piece.z = z; lock(); }
+
+  // ---- Input
+  const actions = {
+    left: () => tryMove(-1, 0, 0), right: () => tryMove(1, 0, 0),
+    up: () => tryMove(0, 1, 0), down: () => tryMove(0, -1, 0),
+    rx: () => rotate('x'), ry: () => rotate('y'), rz: () => rotate('z'),
+    rxb: () => { rotate('x'); rotate('x'); rotate('x'); },
+    ryb: () => { rotate('y'); rotate('y'); rotate('y'); },
+    rzb: () => { rotate('z'); rotate('z'); rotate('z'); },
+    push: () => { if (tryMove(0, 0, 1)) { score += 1; dropTimer = 0; } else lock(); },
+    drop: hardDrop,
+  };
+  function act(name) {
+    if (name === 'pause') { if (state === 'play' || state === 'pause') togglePause(); return; }
+    if (state !== 'play' || !piece || clearing) return;
+    actions[name] && actions[name]();
+    updateHud();
+  }
+  const KEYS = {
+    ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down',
+    KeyQ: 'rz', KeyE: 'rzb', KeyW: 'rx', KeyS: 'rxb', KeyA: 'ry', KeyD: 'ryb',
+    ShiftLeft: 'push', ShiftRight: 'push', Enter: 'push', Space: 'drop', KeyP: 'pause', Escape: 'pause',
+  };
+  window.addEventListener('keydown', e => {
+    const a = KEYS[e.code];
+    if (!a) return;
+    e.preventDefault();
+    if (e.repeat && !/^(left|right|up|down|push)$/.test(a)) return;
+    if (state === 'over' && a === 'drop') { start(); return; }
+    act(a);
+  });
+  document.querySelectorAll('#pad button').forEach(b => {
+    const fire = e => { e.preventDefault(); act(b.dataset.k); };
+    b.addEventListener('pointerdown', fire);
+  });
+  $('ov-btn').addEventListener('click', () => { if (state === 'pause') togglePause(); else start(); });
+
+  // ---- HUD
+  const layerBars = [];
+  (function buildLayers() {
+    const box = $('layers');
+    for (let z = 0; z < D; z++) { const bar = document.createElement('div'); bar.className = 'bar'; bar.innerHTML = '<i></i>'; box.appendChild(bar); layerBars.push(bar); }
+  })();
+  function updateHud() {
+    $('score').textContent = score; $('level').textContent = level; $('lines').textContent = lines;
+    for (let z = 0; z < D; z++) {
+      let n = 0; for (const row of board[z]) for (const v of row) if (v !== null) n++;
+      layerBars[z].firstChild.style.width = (100 * n / (W * H)) + '%';
+      layerBars[z].classList.toggle('full', n === W * H);
+    }
+  }
+
+  // ---- Rendering
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let cw = 0, ch = 0, dpr = 1;
+  function resize() {
+    const r = canvas.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cw = Math.max(1, Math.round(r.width)); ch = Math.max(1, Math.round(r.height));
+    canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
+  }
+  new ResizeObserver(resize).observe(canvas);
+  resize();
+
+  function makeProj(w, h, camD, fitW, fitH) {
+    const f = Math.min(w * 0.92 / fitW, h * 0.92 / fitH) * camD;
+    return (X, Y, Z) => { const s = f / (Z + camD); return [w / 2 + (X - fitW / 2) * s, h / 2 - (Y - fitH / 2) * s]; };
+  }
+
+  const hsl = (h, s, l, a = 1) => `hsla(${h}, ${s}%, ${l}%, ${a})`;
+  function fog(z) { return Math.min(1, z / (D + 2)); } // 0 near .. ~0.85 far
+
+  function quad(c, P, pts, fill, stroke) {
+    c.beginPath();
+    pts.forEach((p, i) => { const q = P(...p); i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]); });
+    c.closePath();
+    c.fillStyle = fill; c.fill();
+    if (stroke) { c.strokeStyle = stroke; c.lineWidth = 1; c.stroke(); }
+  }
+
+  function cubeFaces(c, P, x, y, z, hue, mode, sizeW, sizeH) {
+    // mode: 'solid' | 'ghost' | 'flash'
+    const fz = fog(z);
+    const sat = mode === 'flash' ? 0 : 78 - fz * 40;
+    const lf = mode === 'flash' ? 96 : 58 - fz * 30, ls = lf - 12, lb = lf - 20;
+    const a = mode === 'ghost' ? 0.22 : 1;
+    const edge = mode === 'ghost' ? hsl(hue, 90, 70, 0.7) : hsl(hue, 40, 8, 0.55);
+    const sides = [];
+    if (x + 1 <= sizeW / 2) sides.push([[[x+1,y,z],[x+1,y+1,z],[x+1,y+1,z+1],[x+1,y,z+1]], ls]);
+    if (x >= sizeW / 2)     sides.push([[[x,y,z],[x,y+1,z],[x,y+1,z+1],[x,y,z+1]], ls]);
+    if (y + 1 <= sizeH / 2) sides.push([[[x,y+1,z],[x+1,y+1,z],[x+1,y+1,z+1],[x,y+1,z+1]], lb]);
+    if (y >= sizeH / 2)     sides.push([[[x,y,z],[x+1,y,z],[x+1,y,z+1],[x,y,z+1]], lb]);
+    for (const [pts, l] of sides) quad(c, P, pts, hsl(hue, sat, l, a), edge);
+    quad(c, P, [[x,y,z],[x+1,y,z],[x+1,y+1,z],[x,y+1,z]], hsl(hue, sat, lf, a), edge);
+  }
+
+  function drawWell(P, activeZ) {
+    // depth rings; the ring at the active piece's front is lit as a depth cue
+    for (let z = 0; z <= D; z++) {
+      const strong = z === D, active = z === activeZ;
+      ctx.strokeStyle = active ? 'rgba(108,240,255,0.85)' : strong ? 'rgba(108,240,255,0.5)' : `rgba(59,76,118,${0.9 - fog(z) * 0.5})`;
+      ctx.lineWidth = active ? 2 : strong ? 1.5 : 1;
+      ctx.beginPath();
+      [[0,0],[W,0],[W,H],[0,H]].forEach(([x, y], i) => { const q = P(x, y, z); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); });
+      ctx.closePath(); ctx.stroke();
+    }
+    // rails along depth
+    ctx.strokeStyle = 'rgba(38,50,79,0.9)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x++) { let a = P(x, 0, 0), b = P(x, 0, D); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); a = P(x, H, 0); b = P(x, H, D); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    for (let y = 0; y <= H; y++) { let a = P(0, y, 0), b = P(0, y, D); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); a = P(W, y, 0); b = P(W, y, D); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    ctx.stroke();
+    // far wall grid
+    ctx.strokeStyle = 'rgba(108,240,255,0.25)';
+    ctx.beginPath();
+    for (let x = 1; x < W; x++) { const a = P(x, 0, D), b = P(x, H, D); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    for (let y = 1; y < H; y++) { const a = P(0, y, D), b = P(W, y, D); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    ctx.stroke();
+  }
+
+  function render() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cw, ch);
+    const P = makeProj(cw, ch, CD, W, H);
+    drawWell(P, piece && state === 'play' ? piece.z : -1);
+    if (!board) return;
+
+    const cubes = [];
+    for (let z = 0; z < D; z++) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const h = board[z][y][x];
+      if (h !== null) cubes.push({ x, y, z, h, mode: clearing && clearing.layers.includes(z) ? 'flash' : 'solid' });
+    }
+    if (piece) {
+      const lz = landingZ();
+      if (lz !== piece.z) for (const [cx, cy, cz] of piece.cells) cubes.push({ x: piece.x + cx, y: piece.y + cy, z: lz + cz, h: piece.def.h, mode: 'ghost' });
+      for (const [cx, cy, cz] of piece.cells) cubes.push({ x: piece.x + cx, y: piece.y + cy, z: piece.z + cz, h: piece.def.h, mode: 'solid' });
+    }
+    // painter's algorithm from the camera at (W/2, H/2, -CD)
+    const dist = c => { const dx = c.x + 0.5 - W / 2, dy = c.y + 0.5 - H / 2, dz = c.z + 0.5 + CD; return dx * dx + dy * dy + dz * dz; };
+    cubes.sort((a, b) => dist(b) - dist(a));
+    for (const c of cubes) cubeFaces(ctx, P, c.x, c.y, c.z, c.h, c.mode, W, H);
+  }
+
+  function drawNext() {
+    const w = nextCv.width, h = nextCv.height;
+    nctx.setTransform(1, 0, 0, 1, 0, 0);
+    nctx.clearRect(0, 0, w, h);
+    if (!next) return;
+    const cells = normalize(next.c);
+    const { mx } = bbox(cells);
+    const sw = mx[0] + 1, sh = mx[1] + 1, sd = mx[2] + 1;
+    const fit = Math.max(sw, sh, 2.5);
+    const P = makeProj(w, h, 4.5, fit, fit);
+    const ox = (fit - sw) / 2, oy = (fit - sh) / 2;
+    const list = cells.map(([x, y, z]) => ({ x: x + ox, y: y + oy, z: z + 0.3 }));
+    list.sort((a, b) => {
+      const d = c => { const dx = c.x + 0.5 - fit / 2, dy = c.y + 0.5 - fit / 2, dz = c.z + 0.5 + 4.5; return dx * dx + dy * dy + dz * dz; };
+      return d(b) - d(a);
+    });
+    for (const c of list) cubeFaces(nctx, P, c.x, c.y, c.z, next.h, 'solid', fit, fit);
+  }
+
+  // ---- Loop
+  let lastT = performance.now();
+  function frame(t) {
+    const dt = t - lastT; lastT = t;
+    if (state === 'play') {
+      if (clearing) {
+        if (t >= clearing.until) { finishClear(); updateHud(); }
+      } else if (piece) {
+        dropTimer += dt;
+        if (dropTimer >= dropInterval) {
+          dropTimer = 0;
+          if (!tryMove(0, 0, 1)) lock();
+          updateHud();
+        }
+      }
+    }
+    render();
+    requestAnimationFrame(frame);
+  }
+  board = null; state = 'idle';
+
+  // keep a viewer's game across a republish of this page
+  const snapshot = () => ({ board, score, level, lines, dropInterval, bag, state, pieceIdx: piece ? PIECES.indexOf(piece.def) : -1,
+    pieceCells: piece && piece.cells, px: piece && piece.x, py: piece && piece.y, pz: piece && piece.z, nextIdx: next ? PIECES.indexOf(next) : -1 });
+  function restore(d) {
+    if (!d || !d.board || d.state === 'idle') return;
+    board = d.board; score = d.score; level = d.level; lines = d.lines; dropInterval = d.dropInterval; bag = d.bag;
+    next = d.nextIdx >= 0 ? PIECES[d.nextIdx] : nextPiece();
+    piece = d.pieceIdx >= 0 ? { def: PIECES[d.pieceIdx], cells: d.pieceCells, x: d.px, y: d.py, z: d.pz } : null;
+    state = d.state === 'over' ? 'over' : 'pause';
+    if (state === 'over') gameOver();
+    else { $('ov-title').textContent = 'Пауза'; $('ov-text').textContent = 'Игра восстановлена. Продолжим?'; $('ov-score').hidden = true; $('ov-btn').textContent = 'Продолжить'; overlay.hidden = false; }
+    if (!piece && state === 'pause') spawn();
+    drawNext(); updateHud();
+  }
+  const hot = window.claude && window.claude.hot;
+  if (hot && hot.snapshot) hot.snapshot(snapshot);
+  const boot = data => { restore(data); requestAnimationFrame(frame); };
+  hot && hot.ready ? hot.ready(boot) : boot(hot && hot.data);
+
+  // small hook for automated checks
+  window.__t3d = {
+    state: () => ({ state, score, lines, level, clearing: !!clearing, piece: piece && { name: piece.def.name, x: piece.x, y: piece.y, z: piece.z } }),
+    fillLayer: (z, holes) => { for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!holes.some(([hx, hy]) => hx === x && hy === y)) board[z][y][x] = 200; updateHud(); },
+    count: () => board.flat(2).filter(v => v !== null).length,
+  };
+})();
+</script>
+</body>
+</html>
