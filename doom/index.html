@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hellgate Outpost</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0705;
+    --bg-2: #1a100b;
+    --line: #3a2418;
+    --ink: #e8d9c0;
+    --ink-dim: #9c8468;
+    --accent: #ff3b1f;
+    --font: "VT323", "Courier New", ui-monospace, monospace;
+  }
+  html, body { height: 100%; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 20px;
+    overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  #app { height: 100%; display: grid; grid-template-rows: auto 1fr auto; gap: 8px; padding-inline: 16px; padding-block: 8px; box-sizing: border-box; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 26px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); font-weight: 400; }
+  header .hint { color: var(--ink-dim); font-size: 17px; }
+  @media (max-width: 640px) { header .hint { display: none; } }
+  #stage { position: relative; min-height: 0; min-width: 0; display: grid; place-items: center; }
+  canvas#screen {
+    display: block; width: 320px; height: 200px; max-width: 100%;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    background: #000; border: 2px solid var(--line); box-sizing: border-box; cursor: crosshair;
+  }
+  .overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(10, 7, 5, 0.78); }
+  .overlay .card { text-align: center; display: grid; gap: 12px; padding: 24px; max-width: 460px; }
+  .overlay h2 { margin: 0; font-size: 44px; line-height: 1; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); font-weight: 400; text-wrap: balance; }
+  .overlay p { margin: 0; color: var(--ink-dim); font-size: 20px; line-height: 1.3; }
+  .overlay .stat { font-size: 26px; color: var(--ink); }
+  .btn { font: inherit; font-size: 24px; letter-spacing: 0.1em; text-transform: uppercase; background: var(--accent); color: #1a0500; border: 0; padding: 10px 26px; cursor: pointer; }
+  .btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  #pad { display: none; grid-template-columns: repeat(5, 1fr); gap: 6px; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  @media (pointer: coarse) { #pad { display: grid; } }
+  #pad button { font: inherit; font-size: 22px; background: var(--bg-2); color: var(--ink); border: 1px solid var(--line); min-height: 52px; cursor: pointer; }
+  #pad button:active { background: var(--line); }
+  #pad button.fire { color: var(--accent); border-color: var(--accent); }
+  #pad button:focus-visible { outline: 2px solid var(--accent); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Hellgate Outpost</h1>
+    <div class="hint">WASD / стрелки — движение · мышь или ← → — поворот · ЛКМ / Пробел — огонь · Esc — пауза</div>
+  </header>
+  <div id="stage">
+    <canvas id="screen" width="320" height="200" aria-label="Игровой экран"></canvas>
+    <div class="overlay" id="overlay">
+      <div class="card">
+        <h2 id="ov-title">Hellgate Outpost</h2>
+        <p id="ov-text">Форпост захвачен. Зачистите все четыре сектора. Пистолет, 40 патронов, аптечки по пути.</p>
+        <div class="stat" id="ov-stat" hidden></div>
+        <button class="btn" id="ov-btn">Начать</button>
+      </div>
+    </div>
+  </div>
+  <div id="pad">
+    <button data-k="turnL">◀</button>
+    <button data-k="fwd">▲</button>
+    <button data-k="turnR">▶</button>
+    <button data-k="back">▼</button>
+    <button data-k="fire" class="fire">Огонь</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const SW = 320, SH = 200, VH = 168; // internal resolution; VH = 3D view height, rest is the status bar
+  const TEX = 64;
+  const canvas = document.getElementById('screen');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.imageSmoothingEnabled = false;
+
+  // ---------- deterministic noise
+  let seed = 1337;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+
+  // ---------- procedural wall textures (1 brick, 2 stone, 3 tech, 4 hell)
+  function makeTexture(kind) {
+    const c = document.createElement('canvas'); c.width = TEX; c.height = TEX;
+    const g = c.getContext('2d');
+    const img = g.createImageData(TEX, TEX); const d = img.data;
+    for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) {
+      let r, gg, b; const n = rnd() * 22 - 11;
+      if (kind === 1) { // brick
+        const row = Math.floor(y / 16), off = (row % 2) * 16; const bx = (x + off) % 32, by = y % 16;
+        const mortar = bx < 2 || by < 2;
+        if (mortar) { r = 78 + n; gg = 66 + n; b = 58 + n; } else { r = 150 + n; gg = 62 + n * 0.5; b = 44; }
+      } else if (kind === 2) { // stone blocks
+        const row = Math.floor(y / 21), off = (row % 2) * 10; const bx = (x + off) % 21, by = y % 21;
+        const edge = bx < 2 || by < 2;
+        const base = edge ? 62 : 118 + Math.sin(x * 0.4 + y * 0.7) * 10;
+        r = base + n; gg = base + n - 2; b = base + n - 8;
+      } else if (kind === 3) { // tech panel
+        const panel = (x % 32) < 2 || (y % 32) < 2;
+        const light = (x % 32) > 22 && (x % 32) < 28 && (y % 32) > 10 && (y % 32) < 14;
+        if (panel) { r = 40; gg = 46; b = 56; }
+        else if (light) { r = 90; gg = 220; b = 120; }
+        else { r = 84 + n * 0.5; gg = 92 + n * 0.5; b = 108 + n * 0.5; }
+        if (!panel && !light && (y % 32) > 20 && (y % 32) < 24 && (x % 32) > 4 && (x % 32) < 18) { r = 60; gg = 64; b = 72; }
+      } else { // hell flesh
+        const v = Math.sin(x * 0.35) * Math.cos(y * 0.28) * 30 + Math.sin((x + y) * 0.9) * 12;
+        r = 120 + v + n; gg = 24 + v * 0.3; b = 26 + v * 0.2;
+        if (((x * 7 + y * 13) % 41) < 2) { r = 200; gg = 50; b = 40; }
+      }
+      const i = (y * TEX + x) * 4; d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    // darker copy for the y-facing sides
+    const c2 = document.createElement('canvas'); c2.width = TEX; c2.height = TEX;
+    const g2 = c2.getContext('2d'); g2.drawImage(c, 0, 0); g2.fillStyle = 'rgba(0,0,0,0.3)'; g2.fillRect(0, 0, TEX, TEX);
+    return [c, c2];
+  }
+  const textures = [null, makeTexture(1), makeTexture(2), makeTexture(3), makeTexture(4)];
+
+  // ---------- pixel-art sprites from text
+  const PAL = { B: '#8a4a2a', D: '#4c2410', E: '#ffe040', R: '#d02020', H: '#e8d8b0', C: '#e8d8b0', W: '#ffffff', K: '#111111',
+                G: '#9a9a9a', g: '#5c5c5c', Y: '#e8c030', y: '#a07818', S: '#e0b090', s: '#a07050', M: '#c8c8c8', X: '#ff8020', O: '#ffd040' };
+  function sprite(rows, scale = 1) {
+    const h = rows.length, w = rows[0].length;
+    const c = document.createElement('canvas'); c.width = w * scale; c.height = h * scale;
+    const g = c.getContext('2d');
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const ch = rows[y][x]; if (PAL[ch]) { g.fillStyle = PAL[ch]; g.fillRect(x * scale, y * scale, scale, scale); } }
+    return c;
+  }
+  const IMP_STAND = [
+    '...H........H...', '..HH........HH..', '...DBBBBBBBBD...', '...BBBBBBBBBB...', '...BEEBBBBEEB...', '...BRRBBBBRRB...',
+    '...BBBBBBBBBB...', '....BBDDDDBB....', '....BDRRRRDB....', '.....BBBBBB.....', '..BBBBBBBBBBBB..', '.BBBBBBBBBBBBBB.',
+    '.BBDBBBBBBBBDBB.', 'CBBDBBBBBBBBDBBC', 'CC.DBBBBBBBBD.CC', '...DBBBBBBBBD...', '...BBBBBBBBBB...', '....BBBBBBBB....',
+    '....BBB..BBB....', '....BBB..BBB....', '....BBB..BBB....', '....DBB..BBD....', '...DDDD..DDDD...', '...DDDD..DDDD...'];
+  const IMP_ATTACK = IMP_STAND.map((r, i) => {
+    if (i === 6) return 'CC.BBBBBBBBBB.CC';
+    if (i === 7) return 'CC..BBDDDDBB..CC';
+    if (i === 8) return '.BB.BDRRRRDB.BB.';
+    if (i === 9) return '.BB..BBBBBB..BB.';
+    if (i === 10) return '.BBBBBBBBBBBBBB.';
+    if (i === 13) return '...DBBBBBBBBD...';
+    if (i === 14) return '...DBBBBBBBBD...';
+    return r;
+  });
+  const IMP_PAIN = IMP_STAND.map(r => r.replace(/E/g, 'W').replace(/B/g, 'S').replace(/D/g, 's'));
+  const IMP_DEAD = [
+    '................', '................', '................', '................', '................', '................',
+    '................', '................', '................', '................', '................', '................',
+    '................', '................', '................', '................', '................', '................',
+    '.......H........', '..DBBBBBBBBBBD..', '.DBBBBBBBBBBBBD.', '.DBRRBBBBBBBRBD.', '..DDDDDDDDDDDD..', '................'];
+  const MEDKIT = [
+    '................', '................', '................', '................', '................', '................',
+    '................', '................', '.....GGGGGG.....', '....GWWWWWWG....', '...GWWWRRWWWG...', '...GWWRRRRWWG...',
+    '...GWWRRRRWWG...', '...GWWWRRWWWG...', '...GWWWWWWWWG...', '....GGGGGGGG....'];
+  const AMMO = [
+    '................', '................', '................', '................', '................', '................',
+    '................', '................', '................', '....yyyyyyyy....', '...yYYYYYYYYy...', '...yYKKKKKKYy...',
+    '...yYYYYYYYYy...', '...yYKKKKKKYy...', '...yYYYYYYYYy...', '....yyyyyyyy....'];
+  const SPR = { stand: sprite(IMP_STAND, 2), attack: sprite(IMP_ATTACK, 2), pain: sprite(IMP_PAIN, 2), dead: sprite(IMP_DEAD, 2), medkit: sprite(MEDKIT, 2), ammo: sprite(AMMO, 2) };
+
+  const PISTOL = [
+    '..........gggg..........', '.........gGGGGg.........', '.........gGGGGg.........', '.........gGGGGg.........',
+    '.........gGGGGg.........', '.........gGGGGg.........', '........ggGGGGgg........', '.......gGGGGGGGGg.......',
+    '.......gGGGGGGGGg.......', '.......gGgggggGGg.......', '......ggGGGGGGGGgg......', '.....SSSSgGGGGgSSSS.....',
+    '....SSSSSSgGGgSSSSSS....', '...SSSSSSSSssSSSSSSSS...', '...SSSSSSSSSSSSSSSSSS...', '..sSSSSSSSSSSSSSSSSSSs..',
+    '..sSSSSSSSSSSSSSSSSSSs..', '..ssSSSSSSSSSSSSSSSSss..', '...ssSSSSSSSSSSSSSSss...', '....ssssSSSSSSSSssss....',
+    '......ssssssssssss......', '........ssssssss........', '........ssssssss........', '........ssssssss........'];
+  const FLASH = ['....XX....', '..XOOOOX..', '.XOOOOOOX.', 'XOOOWWOOOX', 'XOOOWWOOOX', '.XOOOOOOX.', '..XOOOOX..', '....XX....'];
+  const SPR_PISTOL = sprite(PISTOL, 3), SPR_FLASH = sprite(FLASH, 3);
+
+  // ---------- level
+  const MAP_SRC = [
+    '########################',
+    '#P.....#.......#.......#',
+    '#......#.......#...E...#',
+    '#..E...+...M...#.......#',
+    '#......#.......#########',
+    '####.###.......#.......#',
+    '#......#...E...+...A...#',
+    '#......#.......#.......#',
+    '#..A...#########.......#',
+    '#......#.......#...E...#',
+    '###.####...E...####.####',
+    '#......#.......#.......#',
+    '#......+.......#..E....#',
+    '#..E...#.......#.......#',
+    '#......##.######.......#',
+    '#......#..#....#...M...#',
+    '#..M...#..#..E.#.......#',
+    '####.###..####.####.####',
+    '#......#...........#...#',
+    '#......#.....E.....#.E.#',
+    '#..E...#...........+...#',
+    '#......#.....A.....#...#',
+    '#......#...........#...#',
+    '########################'];
+  const MW = MAP_SRC[0].length, MH = MAP_SRC.length;
+  const map = [];
+  let start = { x: 1.5, y: 1.5 };
+  const spawnEnemies = [], spawnItems = [];
+  for (let y = 0; y < MH; y++) { map.push([]); for (let x = 0; x < MW; x++) {
+    const ch = MAP_SRC[y][x];
+    let t = 0;
+    if (ch === '#') t = x < 8 ? 1 : y >= 17 ? 4 : x >= 16 ? 3 : 2;
+    map[y].push(t);
+    if (ch === 'P') start = { x: x + 0.5, y: y + 0.5 };
+    if (ch === 'E') spawnEnemies.push({ x: x + 0.5, y: y + 0.5 });
+    if (ch === 'M') spawnItems.push({ x: x + 0.5, y: y + 0.5, kind: 'medkit' });
+    if (ch === 'A') spawnItems.push({ x: x + 0.5, y: y + 0.5, kind: 'ammo' });
+  } }
+  const solid = (x, y) => map[Math.floor(y)] === undefined || map[Math.floor(y)][Math.floor(x)] !== 0;
+
+  // ---------- audio (synth)
+  let ac = null;
+  function audio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ac = null; } } if (ac && ac.state === 'suspended') ac.resume(); return ac; }
+  function sfx(kind) {
+    const a = audio(); if (!a) return;
+    const t = a.currentTime, out = a.createGain(); out.connect(a.destination);
+    if (kind === 'shot') {
+      const len = 0.18, buf = a.createBuffer(1, a.sampleRate * len, a.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.5);
+      const src = a.createBufferSource(); src.buffer = buf; const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1800;
+      src.connect(f); f.connect(out); out.gain.setValueAtTime(0.5, t); src.start(t);
+    } else if (kind === 'hurt') {
+      const o = a.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(50, t + 0.25);
+      o.connect(out); out.gain.setValueAtTime(0.35, t); out.gain.exponentialRampToValueAtTime(0.001, t + 0.3); o.start(t); o.stop(t + 0.3);
+    } else if (kind === 'growl') {
+      const o = a.createOscillator(); o.type = 'square'; o.frequency.setValueAtTime(90, t); o.frequency.linearRampToValueAtTime(60, t + 0.3);
+      o.connect(out); out.gain.setValueAtTime(0.15, t); out.gain.exponentialRampToValueAtTime(0.001, t + 0.35); o.start(t); o.stop(t + 0.35);
+    } else if (kind === 'die') {
+      const o = a.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.5);
+      o.connect(out); out.gain.setValueAtTime(0.3, t); out.gain.exponentialRampToValueAtTime(0.001, t + 0.55); o.start(t); o.stop(t + 0.55);
+    } else if (kind === 'pickup') {
+      const o = a.createOscillator(); o.type = 'square'; o.frequency.setValueAtTime(440, t); o.frequency.setValueAtTime(660, t + 0.08);
+      o.connect(out); out.gain.setValueAtTime(0.2, t); out.gain.exponentialRampToValueAtTime(0.001, t + 0.2); o.start(t); o.stop(t + 0.2);
+    } else if (kind === 'click') {
+      const o = a.createOscillator(); o.type = 'square'; o.frequency.setValueAtTime(1200, t);
+      o.connect(out); out.gain.setValueAtTime(0.1, t); out.gain.exponentialRampToValueAtTime(0.001, t + 0.05); o.start(t); o.stop(t + 0.05);
+    }
+  }
+
+  // ---------- game state
+  const player = { x: 0, y: 0, a: 0, hp: 100, ammo: 40, kills: 0, fireCd: 0, flash: 0, hurt: 0, bob: 0 };
+  let enemies = [], items = [], state = 'idle', msg = '', msgT = 0, time = 0, endTime = 0;
+  const keys = {};
+  const FOV = 0.66;
+
+  function reset() {
+    player.x = start.x; player.y = start.y; player.a = 0; player.hp = 100; player.ammo = 40; player.kills = 0; player.fireCd = 0; player.flash = 0; player.hurt = 0;
+    enemies = spawnEnemies.map(s => ({ x: s.x, y: s.y, hp: 60, state: 'idle', t: 0, atkCd: 1 + Math.random(), pain: 0, awake: false, alive: true }));
+    items = spawnItems.map(s => ({ ...s, taken: false }));
+    time = 0; msg = ''; msgT = 0;
+  }
+  function say(s) { msg = s; msgT = 2.5; }
+
+  // ---------- helpers
+  function moveWithCollision(o, dx, dy, r) {
+    if (!solid(o.x + dx + Math.sign(dx) * r, o.y - r) && !solid(o.x + dx + Math.sign(dx) * r, o.y + r)) o.x += dx;
+    if (!solid(o.x - r, o.y + dy + Math.sign(dy) * r) && !solid(o.x + r, o.y + dy + Math.sign(dy) * r)) o.y += dy;
+  }
+  function lineOfSight(ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay, dist = Math.hypot(dx, dy), steps = Math.ceil(dist / 0.1);
+    for (let i = 1; i < steps; i++) { const t = i / steps; if (solid(ax + dx * t, ay + dy * t)) return false; }
+    return true;
+  }
+
+  // ---------- update
+  function update(dt) {
+    time += dt;
+    // player input
+    const turn = (keys.ArrowLeft || keys.turnL ? -1 : 0) + (keys.ArrowRight || keys.turnR ? 1 : 0);
+    player.a += turn * 2.4 * dt;
+    const fwd = (keys.KeyW || keys.ArrowUp || keys.fwd ? 1 : 0) - (keys.KeyS || keys.ArrowDown || keys.back ? 1 : 0);
+    const strafe = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+    const speed = 3.2 * dt;
+    const dx = (Math.cos(player.a) * fwd - Math.sin(player.a) * strafe) * speed;
+    const dy = (Math.sin(player.a) * fwd + Math.cos(player.a) * strafe) * speed;
+    if (fwd || strafe) { moveWithCollision(player, dx, dy, 0.25); player.bob += dt * 9; }
+    player.fireCd = Math.max(0, player.fireCd - dt); player.flash = Math.max(0, player.flash - dt); player.hurt = Math.max(0, player.hurt - dt);
+    if ((keys.Space || keys.fire || keys.mouseFire || keys.fireOnce) && player.fireCd === 0) fire();
+    keys.fireOnce = false;
+    // items
+    for (const it of items) if (!it.taken && Math.hypot(it.x - player.x, it.y - player.y) < 0.5) {
+      if (it.kind === 'medkit') { if (player.hp >= 100) continue; player.hp = Math.min(100, player.hp + 25); say('Аптечка +25'); }
+      else { player.ammo += 20; say('Патроны +20'); }
+      it.taken = true; sfx('pickup');
+    }
+    // enemies
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      e.t += dt; e.pain = Math.max(0, e.pain - dt); e.atkCd = Math.max(0, e.atkCd - dt);
+      const ddx = player.x - e.x, ddy = player.y - e.y, dist = Math.hypot(ddx, ddy);
+      if (!e.awake) { if (dist < 9 && lineOfSight(e.x, e.y, player.x, player.y)) { e.awake = true; sfx('growl'); } continue; }
+      if (e.pain > 0) { e.state = 'pain'; continue; }
+      if (dist < 1.1) {
+        e.state = 'attack';
+        if (e.atkCd === 0) { e.atkCd = 1.1; player.hp -= 7 + Math.floor(Math.random() * 8); player.hurt = 0.35; sfx('hurt'); if (player.hp <= 0) die(); }
+      } else {
+        e.state = 'walk';
+        const sees = lineOfSight(e.x, e.y, player.x, player.y);
+        if (sees) { e.lastX = player.x; e.lastY = player.y; }
+        const tx = e.lastX !== undefined ? e.lastX : player.x, ty = e.lastY !== undefined ? e.lastY : player.y;
+        const mx = tx - e.x, my = ty - e.y, md = Math.hypot(mx, my) || 1;
+        if (md > 0.3) moveWithCollision(e, mx / md * 1.5 * dt, my / md * 1.5 * dt, 0.3);
+        // don't stack on other enemies
+        for (const o of enemies) if (o !== e && o.alive) { const ox = e.x - o.x, oy = e.y - o.y, od = Math.hypot(ox, oy); if (od < 0.6 && od > 0) moveWithCollision(e, ox / od * 0.6 * dt, oy / od * 0.6 * dt, 0.3); }
+      }
+    }
+    if (msgT > 0) msgT -= dt;
+    if (player.kills === enemies.length && state === 'play') win();
+  }
+
+  function fire() {
+    if (player.ammo <= 0) { sfx('click'); player.fireCd = 0.3; say('Нет патронов'); return; }
+    player.ammo--; player.fireCd = 0.32; player.flash = 0.08; sfx('shot');
+    // hitscan: nearest enemy near the screen centre with clear line of sight
+    let best = null, bestD = Infinity;
+    const cx = Math.cos(player.a), cy = Math.sin(player.a);
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const dx = e.x - player.x, dy = e.y - player.y, dist = Math.hypot(dx, dy);
+      const along = dx * cx + dy * cy, side = -dx * cy + dy * cx;
+      if (along <= 0) continue;
+      if (Math.abs(side) < 0.45 && dist < bestD && lineOfSight(player.x, player.y, e.x, e.y)) { best = e; bestD = dist; }
+    }
+    if (best) {
+      best.hp -= 34; best.pain = 0.25; best.awake = true;
+      if (best.hp <= 0) { best.alive = false; best.state = 'dead'; player.kills++; sfx('die'); }
+    }
+  }
+
+  function die() {
+    state = 'dead'; endTime = time;
+    ov('Вы погибли', 'Форпост остался у демонов.', `Убито ${player.kills} из ${enemies.length}`, 'Ещё раз');
+  }
+  function win() {
+    state = 'won'; endTime = time;
+    ov('Сектор зачищен', 'Все демоны уничтожены. Врата закрыты.', `Время ${Math.floor(time)} с · Здоровье ${Math.max(0, player.hp)}%`, 'Играть снова');
+  }
+  const $ = id => document.getElementById(id);
+  function ov(title, text, stat, btn) {
+    $('ov-title').textContent = title; $('ov-text').textContent = text;
+    $('ov-stat').hidden = !stat; $('ov-stat').textContent = stat || ''; $('ov-btn').textContent = btn; $('overlay').hidden = false;
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  // ---------- render
+  const zbuf = new Float32Array(SW);
+  function render() {
+    // ceiling / floor with distance shading
+    const cg = ctx.createLinearGradient(0, 0, 0, VH / 2); cg.addColorStop(0, '#3a3a44'); cg.addColorStop(1, '#0c0c10');
+    ctx.fillStyle = cg; ctx.fillRect(0, 0, SW, VH / 2);
+    const fg = ctx.createLinearGradient(0, VH / 2, 0, VH); fg.addColorStop(0, '#0e0a08'); fg.addColorStop(1, '#4a3628');
+    ctx.fillStyle = fg; ctx.fillRect(0, VH / 2, SW, VH / 2);
+
+    const dirX = Math.cos(player.a), dirY = Math.sin(player.a), plX = -dirY * FOV, plY = dirX * FOV;
+    const bobY = Math.sin(player.bob) * 2;
+    for (let x = 0; x < SW; x++) {
+      const camX = 2 * x / SW - 1, rdX = dirX + plX * camX, rdY = dirY + plY * camX;
+      let mx = Math.floor(player.x), my = Math.floor(player.y);
+      const ddx = Math.abs(1 / rdX), ddy = Math.abs(1 / rdY);
+      let stX, stY, sdX, sdY, side = 0, hit = 0, guard = 0;
+      if (rdX < 0) { stX = -1; sdX = (player.x - mx) * ddx; } else { stX = 1; sdX = (mx + 1 - player.x) * ddx; }
+      if (rdY < 0) { stY = -1; sdY = (player.y - my) * ddy; } else { stY = 1; sdY = (my + 1 - player.y) * ddy; }
+      while (!hit && guard++ < 64) {
+        if (sdX < sdY) { sdX += ddx; mx += stX; side = 0; } else { sdY += ddy; my += stY; side = 1; }
+        if (my < 0 || my >= MH || mx < 0 || mx >= MW) { hit = 1; break; }
+        hit = map[my][mx];
+      }
+      const dist = side === 0 ? sdX - ddx : sdY - ddy;
+      zbuf[x] = dist;
+      const h = Math.floor(VH / dist);
+      const y0 = Math.floor(-h / 2 + VH / 2 + bobY);
+      let wallX = side === 0 ? player.y + dist * rdY : player.x + dist * rdX; wallX -= Math.floor(wallX);
+      let tx = Math.floor(wallX * TEX); if ((side === 0 && rdX > 0) || (side === 1 && rdY < 0)) tx = TEX - tx - 1;
+      const tex = textures[hit] || textures[2];
+      ctx.drawImage(tex[side], tx, 0, 1, TEX, x, y0, 1, h);
+      const shade = Math.min(0.85, dist / 14);
+      if (shade > 0.02) { ctx.fillStyle = `rgba(0,0,0,${shade})`; ctx.fillRect(x, Math.max(0, y0), 1, Math.min(h, VH - Math.max(0, y0))); }
+    }
+
+    // sprites
+    const list = [];
+    for (const e of enemies) list.push({ x: e.x, y: e.y, img: SPR[e.alive ? (e.state === 'attack' ? 'attack' : e.state === 'pain' ? 'pain' : 'stand') : 'dead'], sc: 0.9 });
+    for (const it of items) if (!it.taken) list.push({ x: it.x, y: it.y, img: SPR[it.kind], sc: 0.6 });
+    for (const s of list) { s.d = (s.x - player.x) ** 2 + (s.y - player.y) ** 2; }
+    list.sort((a, b) => b.d - a.d);
+    const invDet = 1 / (plX * dirY - dirX * plY);
+    for (const s of list) {
+      const sx = s.x - player.x, sy = s.y - player.y;
+      const trX = invDet * (dirY * sx - dirX * sy), trY = invDet * (-plY * sx + plX * sy);
+      if (trY <= 0.1) continue;
+      const scrX = Math.floor(SW / 2 * (1 + trX / trY));
+      const full = Math.abs(Math.floor(VH / trY));
+      const hgt = Math.floor(full * s.sc), wid = Math.floor(hgt * s.img.width / s.img.height);
+      const bottom = Math.floor(VH / 2 + full / 2 + bobY), top = bottom - hgt;
+      const xs = Math.max(0, scrX - wid / 2 | 0), xe = Math.min(SW - 1, scrX + wid / 2 | 0);
+      const shade = Math.min(0.8, trY / 14);
+      for (let x = xs; x <= xe; x++) {
+        if (zbuf[x] <= trY) continue;
+        const texX = Math.floor((x - (scrX - wid / 2)) * s.img.width / wid);
+        ctx.drawImage(s.img, texX, 0, 1, s.img.height, x, top, 1, hgt);
+      }
+    }
+
+    // weapon
+    const wb = Math.sin(player.bob) * 3, wx = SW / 2 - SPR_PISTOL.width / 2 + Math.cos(player.bob / 2) * 4, wy = VH - SPR_PISTOL.height + 10 + Math.abs(wb) + (player.fireCd > 0.22 ? 6 : 0);
+    if (player.flash > 0) ctx.drawImage(SPR_FLASH, wx + SPR_PISTOL.width / 2 - SPR_FLASH.width / 2, wy - SPR_FLASH.height + 8);
+    ctx.drawImage(SPR_PISTOL, wx, wy);
+    // crosshair
+    ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(SW / 2 - 1, VH / 2 - 4, 2, 3); ctx.fillRect(SW / 2 - 1, VH / 2 + 2, 2, 3); ctx.fillRect(SW / 2 - 4, VH / 2 - 1, 3, 2); ctx.fillRect(SW / 2 + 2, VH / 2 - 1, 3, 2);
+    // damage flash
+    if (player.hurt > 0) { ctx.fillStyle = `rgba(200,0,0,${player.hurt * 1.2})`; ctx.fillRect(0, 0, SW, VH); }
+    if (player.flash > 0) { ctx.fillStyle = 'rgba(255,200,80,0.08)'; ctx.fillRect(0, 0, SW, VH); }
+
+    // status bar
+    ctx.fillStyle = '#2a2a2e'; ctx.fillRect(0, VH, SW, SH - VH);
+    ctx.fillStyle = '#4a4a50'; ctx.fillRect(0, VH, SW, 1);
+    ctx.font = '10px monospace'; ctx.textBaseline = 'top';
+    const stat = (x, label, val, col) => { ctx.fillStyle = '#9a9aa0'; ctx.fillText(label, x, VH + 4); ctx.fillStyle = col; ctx.font = 'bold 16px monospace'; ctx.fillText(val, x, VH + 13); ctx.font = '10px monospace'; };
+    stat(8, 'ЗДОРОВЬЕ', Math.max(0, player.hp) + '%', player.hp > 30 ? '#ffd040' : '#ff4030');
+    stat(100, 'ПАТРОНЫ', String(player.ammo), player.ammo > 0 ? '#ffd040' : '#ff4030');
+    stat(180, 'УБИТО', `${player.kills}/${enemies.length}`, '#ffd040');
+    stat(250, 'ВРЕМЯ', `${Math.floor(time)}`, '#ffd040');
+    if (msgT > 0) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, SW, 14); ctx.fillStyle = '#ffe080'; ctx.font = 'bold 11px monospace'; ctx.fillText(msg, 6, 2); }
+
+    // minimap
+    const ms = 2, mw = MW * ms, ox = SW - mw - 4, oy = 4;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(ox - 1, oy - 1, mw + 2, MH * ms + 2);
+    for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) if (map[y][x]) { ctx.fillStyle = '#777'; ctx.fillRect(ox + x * ms, oy + y * ms, ms, ms); }
+    for (const e of enemies) if (e.alive && e.awake) { ctx.fillStyle = '#f33'; ctx.fillRect(ox + e.x * ms - 1, oy + e.y * ms - 1, 2, 2); }
+    ctx.fillStyle = '#4f4'; ctx.fillRect(ox + player.x * ms - 1, oy + player.y * ms - 1, 2, 2);
+  }
+
+  // ---------- input
+  const KEYMAP = { KeyW: 1, KeyA: 1, KeyS: 1, KeyD: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Space: 1 };
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Escape') { if (state === 'play') pause(); return; }
+    if (!KEYMAP[e.code]) return;
+    e.preventDefault(); keys[e.code] = true;
+    if (e.code === 'Space' && !e.repeat) keys.fireOnce = true;
+  });
+  window.addEventListener('keyup', e => { if (KEYMAP[e.code]) keys[e.code] = false; });
+  canvas.addEventListener('mousedown', e => {
+    if (state !== 'play') return;
+    e.preventDefault();
+    if (matchMedia('(pointer: fine)').matches && !document.pointerLockElement && canvas.requestPointerLock) {
+      try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) { /* pointer lock unavailable */ }
+    }
+    keys.mouseFire = true; keys.fireOnce = true;
+  });
+  window.addEventListener('mouseup', () => { keys.mouseFire = false; });
+  window.addEventListener('mousemove', e => { if (document.pointerLockElement === canvas && state === 'play') player.a += e.movementX * 0.0032; });
+  document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas && state === 'play') pause(); });
+  // touch: drag on the screen turns, pad buttons move
+  let lastTouchX = null;
+  canvas.addEventListener('touchstart', e => { lastTouchX = e.touches[0].clientX; audio(); }, { passive: true });
+  canvas.addEventListener('touchmove', e => { if (lastTouchX !== null && state === 'play') { player.a += (e.touches[0].clientX - lastTouchX) * 0.01; lastTouchX = e.touches[0].clientX; } }, { passive: true });
+  canvas.addEventListener('touchend', () => { lastTouchX = null; });
+  document.querySelectorAll('#pad button').forEach(b => {
+    const k = b.dataset.k;
+    b.addEventListener('pointerdown', e => { e.preventDefault(); keys[k] = true; if (k === 'fire') keys.fireOnce = true; audio(); b.setPointerCapture && b.setPointerCapture(e.pointerId); });
+    const off = () => { keys[k] = false; };
+    b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('pointerleave', off);
+  });
+
+  function pause() {
+    state = 'pause';
+    ov('Пауза', 'Демоны ждут.', '', 'Продолжить');
+  }
+  $('ov-btn').addEventListener('click', () => {
+    audio();
+    if (state === 'pause') { state = 'play'; $('overlay').hidden = true; last = performance.now(); return; }
+    reset(); state = 'play'; $('overlay').hidden = true; last = performance.now();
+  });
+
+  // ---------- fit the 320x200 screen into the stage, integer scale where possible
+  const stage = document.getElementById('stage');
+  function fit() {
+    const r = stage.getBoundingClientRect();
+    let k = Math.min(r.width / SW, r.height / SH);
+    if (k >= 1) k = Math.floor(k);
+    canvas.style.width = Math.floor(SW * k) + 'px'; canvas.style.height = Math.floor(SH * k) + 'px';
+  }
+  new ResizeObserver(fit).observe(stage); fit();
+
+  // ---------- loop
+  let last = performance.now();
+  function frame(t) {
+    const dt = Math.min(0.05, (t - last) / 1000); last = t;
+    if (state === 'play') update(dt);
+    if (state !== 'idle') render(); else renderTitle();
+    requestAnimationFrame(frame);
+  }
+  function renderTitle() {
+    player.x = start.x; player.y = start.y; player.a = performance.now() / 4000; player.bob = 0;
+    if (!enemies.length) reset();
+    render();
+  }
+  reset(); state = 'idle';
+  requestAnimationFrame(frame);
+
+  window.__doom = {
+    state: () => ({ state, hp: player.hp, ammo: player.ammo, kills: player.kills, enemies: enemies.length, x: player.x, y: player.y, awake: enemies.filter(e => e.awake).length }),
+    key: (k, v) => { keys[k] = v; },
+    teleport: (x, y, a) => { player.x = x; player.y = y; player.a = a; },
+    enemies: () => enemies.map(e => ({ x: e.x, y: e.y, hp: e.hp, alive: e.alive })),
+    killAll: () => { for (const e of enemies) if (e.alive) { e.alive = false; e.state = 'dead'; player.kills++; } },
+  };
+})();
+</script>
+</body>
+</html>
