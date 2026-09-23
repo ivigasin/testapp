@@ -59,7 +59,7 @@
     <div class="overlay" id="overlay">
       <div class="card">
         <h2 id="ov-title">Hellgate Outpost</h2>
-        <p id="ov-text">Форпост захвачен. Зачистите все четыре сектора: бесы, громилы и запертые двери. Пистолет, 40 патронов; дробовик спрятан в западном крыле.</p>
+        <p id="ov-text">Форпост захвачен. Пробейтесь через четыре сектора к рубильнику выхода на юго-востоке. Бесы плюются огнём, громилы рвут в ближнем бою. Пистолет, 40 патронов; дробовик спрятан в западном крыле.</p>
         <div class="stat" id="ov-stat" hidden></div>
         <button class="btn" id="ov-btn">Начать</button>
       </div>
@@ -116,6 +116,12 @@
         const stripe = y > 26 && y < 38 && x > 8 && x < TEX - 8;
         const rivet = ((x % 16) === 8 && (y % 16) === 8) || ((x % 16) === 8 && (y % 16) === 9) || ((x % 16) === 9 && (y % 16) === 8) || ((x % 16) === 9 && (y % 16) === 9);
         if (frame) { r = 50; gg = 52; b = 58; } else if (stripe) { r = 160 + n; gg = 30; b = 30; } else if (rivet) { r = 140; gg = 140; b = 150; } else { r = 96 + n * 0.5; gg = 98 + n * 0.5; b = 106 + n * 0.5; }
+      } else if (kind === 6) { // exit switch: dark panel, green glowing bars, red lever
+        const frame = x < 3 || x >= TEX - 3 || y < 3 || y >= TEX - 3;
+        const bar = y > 10 && y < 22 && ((x > 6 && x < 26) || (x > 38 && x < 58));
+        const lever = x > 28 && x < 36 && y > 26 && y < 54;
+        const knob = x > 25 && x < 39 && y > 24 && y < 32;
+        if (frame) { r = 30; gg = 32; b = 36; } else if (bar) { r = 60 + n; gg = 220 + n; b = 90; } else if (knob) { r = 220; gg = 40; b = 30; } else if (lever) { r = 150; gg = 150; b = 160; } else { r = 52 + n * 0.5; gg = 56 + n * 0.5; b = 62 + n * 0.5; }
       } else { // hell flesh
         const v = Math.sin(x * 0.35) * Math.cos(y * 0.28) * 30 + Math.sin((x + y) * 0.9) * 12;
         r = 120 + v + n; gg = 24 + v * 0.3; b = 26 + v * 0.2;
@@ -129,7 +135,7 @@
     const g2 = c2.getContext('2d'); g2.drawImage(c, 0, 0); g2.fillStyle = 'rgba(0,0,0,0.3)'; g2.fillRect(0, 0, TEX, TEX);
     return [c, c2];
   }
-  const textures = [null, makeTexture(1), makeTexture(2), makeTexture(3), makeTexture(4), makeTexture(5)];
+  const textures = [null, makeTexture(1), makeTexture(2), makeTexture(3), makeTexture(4), makeTexture(5), makeTexture(6)];
 
   // ---------- pixel-art sprites from text
   const PAL = { B: '#8a4a2a', D: '#4c2410', E: '#ffe040', R: '#d02020', H: '#e8d8b0', C: '#e8d8b0', W: '#ffffff', K: '#111111',
@@ -181,7 +187,9 @@
     brute: { stand: sprite(IMP_STAND, 2, BRUTE_PAL), attack: sprite(IMP_ATTACK, 2, BRUTE_PAL), pain: sprite(IMP_PAIN, 2, BRUTE_PAL), dead: sprite(IMP_DEAD, 2, BRUTE_PAL) },
     medkit: sprite(MEDKIT, 2), ammo: sprite(AMMO, 2), shells: sprite(SHELLS, 2), shotgun: sprite(SHOTGUN_ITEM, 2),
   };
-  const KINDS = { imp: { hp: 60, speed: 1.5, dmg: [7, 8], range: 9, scale: 0.9 }, brute: { hp: 150, speed: 2.6, dmg: [14, 12], range: 7, scale: 1.05 } };
+  const FIREBALL = ['..XX..', '.XOOX.', 'XOWWOX', 'XOWWOX', '.XOOX.', '..XX..'];
+  const SPR_FIREBALL = sprite(FIREBALL, 2);
+  const KINDS = { imp: { hp: 60, speed: 1.5, dmg: [7, 8], range: 9, scale: 0.9, fire: true }, brute: { hp: 150, speed: 2.6, dmg: [14, 12], range: 7, scale: 1.05, fire: false } };
 
   const PISTOL = [
     '..........gggg..........', '.........gGGGGg.........', '.........gGGGGg.........', '.........gGGGGg.........',
@@ -229,7 +237,7 @@
     '#..B...#.....H.....+...#',
     '#..H...#.....A.....#...#',
     '#......#...........#...#',
-    '########################'];
+    '#####################X##'];
   const MW = MAP_SRC[0].length, MH = MAP_SRC.length;
   const map = [];
   let start = { x: 1.5, y: 1.5 };
@@ -239,6 +247,7 @@
     let t = 0;
     if (ch === '#') t = x < 8 ? 1 : y >= 17 ? 4 : x >= 16 ? 3 : 2;
     if (ch === '+') { t = 5; doorDefs.push({ x, y }); }
+    if (ch === 'X') t = 6;
     map[y].push(t);
     if (ch === 'P') start = { x: x + 0.5, y: y + 0.5 };
     if (ch === 'E') spawnEnemies.push({ x: x + 0.5, y: y + 0.5, kind: 'imp' });
@@ -272,6 +281,10 @@
       for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.8);
       const src = a.createBufferSource(); src.buffer = buf; const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 700;
       src.connect(f); f.connect(out); out.gain.setValueAtTime(0.9, t); src.start(t);
+    } else if (kind === 'fire') {
+      const o = a.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(600, t); o.frequency.exponentialRampToValueAtTime(150, t + 0.3);
+      const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900; o.connect(f); f.connect(out);
+      out.gain.setValueAtTime(0.18, t); out.gain.exponentialRampToValueAtTime(0.001, t + 0.35); o.start(t); o.stop(t + 0.35);
     } else if (kind === 'door') {
       const o = a.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(120, t); o.frequency.linearRampToValueAtTime(180, t + 0.25);
       o.connect(out); out.gain.setValueAtTime(0.12, t); out.gain.exponentialRampToValueAtTime(0.001, t + 0.3); o.start(t); o.stop(t + 0.3);
@@ -295,15 +308,16 @@
 
   // ---------- game state
   const player = { x: 0, y: 0, a: 0, hp: 100, ammo: 40, shells: 0, kills: 0, fireCd: 0, flash: 0, hurt: 0, bob: 0, weapon: 'pistol', hasShotgun: false };
-  let enemies = [], items = [], state = 'idle', msg = '', msgT = 0, time = 0, endTime = 0;
+  let enemies = [], items = [], shots = [], state = 'idle', msg = '', msgT = 0, time = 0, endTime = 0;
   const keys = {};
   const FOV = 0.66;
 
   function reset() {
     player.x = start.x; player.y = start.y; player.a = 0; player.hp = 100; player.ammo = 40; player.shells = 0; player.kills = 0; player.fireCd = 0; player.flash = 0; player.hurt = 0;
-    player.weapon = 'pistol'; player.hasShotgun = false;
-    enemies = spawnEnemies.map(s => ({ x: s.x, y: s.y, kind: s.kind, hp: KINDS[s.kind].hp, state: 'idle', t: 0, atkCd: 1 + Math.random(), pain: 0, awake: false, alive: true }));
+    player.weapon = 'pistol'; player.hasShotgun = false; player.allDead = false;
+    enemies = spawnEnemies.map(s => ({ x: s.x, y: s.y, kind: s.kind, hp: KINDS[s.kind].hp, state: 'idle', t: 0, atkCd: 0.4 + Math.random() * 0.6, pain: 0, awake: false, alive: true }));
     items = spawnItems.map(s => ({ ...s, taken: false }));
+    shots = [];
     doors = doorDefs.map(d => ({ x: d.x, y: d.y, open: false, t: 0 }));
     time = 0; msg = ''; msgT = 0;
   }
@@ -332,6 +346,7 @@
     const dx = (Math.cos(player.a) * fwd - Math.sin(player.a) * strafe) * speed;
     const dy = (Math.sin(player.a) * fwd + Math.cos(player.a) * strafe) * speed;
     if (fwd || strafe) { moveWithCollision(player, dx, dy, 0.25); player.bob += dt * 9; }
+    if (fwd > 0) { const fx = player.x + Math.cos(player.a) * 0.6, fy = player.y + Math.sin(player.a) * 0.6; const row = map[Math.floor(fy)]; if (row && row[Math.floor(fx)] === 6) { win(); return; } }
     player.fireCd = Math.max(0, player.fireCd - dt); player.flash = Math.max(0, player.flash - dt); player.hurt = Math.max(0, player.hurt - dt);
     if ((keys.Space || keys.fire || keys.mouseFire || keys.fireOnce) && player.fireCd === 0) fire();
     keys.fireOnce = false;
@@ -368,6 +383,17 @@
         e.state = 'walk';
         const sees = lineOfSight(e.x, e.y, player.x, player.y);
         if (sees) { e.lastX = player.x; e.lastY = player.y; }
+        if (sees && K.fire && dist > 2.5 && dist < 9) {
+          // ranged imps hold their ground and lob fireballs
+          if (e.atkCd === 0) {
+            e.atkCd = 1.8 + Math.random(); e.state = 'attack'; e.t = 0;
+            const nx = ddx / dist, ny = ddy / dist;
+            shots.push({ x: e.x + nx * 0.4, y: e.y + ny * 0.4, vx: nx * 5, vy: ny * 5, ttl: 4 });
+            player.shotsSeen = (player.shotsSeen || 0) + 1;
+            sfx('fire');
+          } else if (e.atkCd > 1.2) e.state = 'attack';
+          continue;
+        }
         const tx = e.lastX !== undefined ? e.lastX : player.x, ty = e.lastY !== undefined ? e.lastY : player.y;
         const mx = tx - e.x, my = ty - e.y, md = Math.hypot(mx, my) || 1;
         if (md > 0.3) moveWithCollision(e, mx / md * K.speed * dt, my / md * K.speed * dt, 0.3);
@@ -375,8 +401,15 @@
         for (const o of enemies) if (o !== e && o.alive) { const ox = e.x - o.x, oy = e.y - o.y, od = Math.hypot(ox, oy); if (od < 0.6 && od > 0) moveWithCollision(e, ox / od * 0.6 * dt, oy / od * 0.6 * dt, 0.3); }
       }
     }
+    // fireballs
+    for (const f of shots) {
+      f.x += f.vx * dt; f.y += f.vy * dt; f.ttl -= dt;
+      if (solid(f.x, f.y) || f.ttl <= 0) { f.dead = true; continue; }
+      if (Math.hypot(f.x - player.x, f.y - player.y) < 0.45) { f.dead = true; player.hp -= 10 + Math.floor(Math.random() * 6); player.hurt = 0.35; sfx('hurt'); if (player.hp <= 0) { die(); return; } }
+    }
+    shots = shots.filter(f => !f.dead);
     if (msgT > 0) msgT -= dt;
-    if (player.kills === enemies.length && state === 'play') win();
+    if (player.kills === enemies.length && !player.allDead) { player.allDead = true; say('Все демоны мертвы. Найдите выход на юго-востоке.'); }
   }
 
   function fire() {
@@ -410,7 +443,10 @@
   }
   function win() {
     state = 'won'; endTime = time;
-    ov('Сектор зачищен', 'Все демоны уничтожены. Врата закрыты.', `Время ${Math.floor(time)} с · Здоровье ${Math.max(0, player.hp)}%`, 'Играть снова');
+    const found = items.filter(i => i.taken).length;
+    const pct = Math.round(100 * player.kills / enemies.length);
+    ov('Уровень пройден', pct === 100 ? 'Форпост зачищен полностью. Врата закрыты.' : 'Вы выбрались, но часть демонов осталась.',
+      `Убито ${pct}% (${player.kills}/${enemies.length}) · Предметы ${found}/${items.length} · Время ${Math.floor(time)} с · Здоровье ${Math.max(0, player.hp)}%`, 'Играть снова');
   }
   const $ = id => document.getElementById(id);
   function ov(title, text, stat, btn) {
@@ -459,6 +495,7 @@
     const list = [];
     for (const e of enemies) list.push({ x: e.x, y: e.y, img: SPR[e.kind][e.alive ? (e.state === 'attack' ? 'attack' : e.state === 'pain' ? 'pain' : 'stand') : 'dead'], sc: KINDS[e.kind].scale });
     for (const it of items) if (!it.taken) list.push({ x: it.x, y: it.y, img: SPR[it.kind], sc: 0.6 });
+    for (const f of shots) list.push({ x: f.x, y: f.y, img: SPR_FIREBALL, sc: 0.22, lift: 0.35 });
     for (const s of list) { s.d = (s.x - player.x) ** 2 + (s.y - player.y) ** 2; }
     list.sort((a, b) => b.d - a.d);
     const invDet = 1 / (plX * dirY - dirX * plY);
@@ -469,7 +506,7 @@
       const scrX = Math.floor(SW / 2 * (1 + trX / trY));
       const full = Math.abs(Math.floor(VH / trY));
       const hgt = Math.floor(full * s.sc), wid = Math.floor(hgt * s.img.width / s.img.height);
-      const bottom = Math.floor(VH / 2 + full / 2 + bobY), top = bottom - hgt;
+      const bottom = Math.floor(VH / 2 + full / 2 + bobY - full * (s.lift || 0)), top = bottom - hgt;
       const xs = Math.max(0, scrX - wid / 2 | 0), xe = Math.min(SW - 1, scrX + wid / 2 | 0);
       const shade = Math.min(0.8, trY / 14);
       for (let x = xs; x <= xe; x++) {
@@ -583,7 +620,7 @@
   requestAnimationFrame(frame);
 
   window.__doom = {
-    state: () => ({ state, hp: player.hp, ammo: player.ammo, shells: player.shells, weapon: player.weapon, doorsOpen: doors.filter(d => d.open).length, kills: player.kills, enemies: enemies.length, x: player.x, y: player.y, awake: enemies.filter(e => e.awake).length }),
+    state: () => ({ state, shots: shots.length, fired: player.shotsSeen || 0, hp: player.hp, ammo: player.ammo, shells: player.shells, weapon: player.weapon, doorsOpen: doors.filter(d => d.open).length, kills: player.kills, enemies: enemies.length, x: player.x, y: player.y, awake: enemies.filter(e => e.awake).length }),
     key: (k, v) => { keys[k] = v; },
     teleport: (x, y, a) => { player.x = x; player.y = y; player.a = a; },
     enemies: () => enemies.map(e => ({ x: e.x, y: e.y, hp: e.hp, alive: e.alive, kind: e.kind })),
