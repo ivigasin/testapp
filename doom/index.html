@@ -52,14 +52,14 @@
 <div id="app">
   <header>
     <h1>Hellgate Outpost</h1>
-    <div class="hint">WASD / стрелки — движение · мышь или ← → — поворот · ЛКМ / Пробел — огонь · Esc — пауза</div>
+    <div class="hint">WASD / стрелки — движение · мышь или ← → — поворот · ЛКМ / Пробел — огонь · 1 / 2 / Q — оружие · Esc — пауза</div>
   </header>
   <div id="stage">
     <canvas id="screen" width="320" height="200" aria-label="Игровой экран"></canvas>
     <div class="overlay" id="overlay">
       <div class="card">
         <h2 id="ov-title">Hellgate Outpost</h2>
-        <p id="ov-text">Форпост захвачен. Зачистите все четыре сектора. Пистолет, 40 патронов, аптечки по пути.</p>
+        <p id="ov-text">Форпост захвачен. Зачистите все четыре сектора: бесы, громилы и запертые двери. Пистолет, 40 патронов; дробовик спрятан в западном крыле.</p>
         <div class="stat" id="ov-stat" hidden></div>
         <button class="btn" id="ov-btn">Начать</button>
       </div>
@@ -71,6 +71,7 @@
     <button data-k="turnR">▶</button>
     <button data-k="back">▼</button>
     <button data-k="fire" class="fire">Огонь</button>
+    <button data-k="swap" style="grid-column: span 5">Сменить оружие</button>
   </div>
 </div>
 
@@ -110,6 +111,11 @@
         else if (light) { r = 90; gg = 220; b = 120; }
         else { r = 84 + n * 0.5; gg = 92 + n * 0.5; b = 108 + n * 0.5; }
         if (!panel && !light && (y % 32) > 20 && (y % 32) < 24 && (x % 32) > 4 && (x % 32) < 18) { r = 60; gg = 64; b = 72; }
+      } else if (kind === 5) { // steel door with a red stripe
+        const frame = x < 4 || x >= TEX - 4 || y < 4 || y >= TEX - 4;
+        const stripe = y > 26 && y < 38 && x > 8 && x < TEX - 8;
+        const rivet = ((x % 16) === 8 && (y % 16) === 8) || ((x % 16) === 8 && (y % 16) === 9) || ((x % 16) === 9 && (y % 16) === 8) || ((x % 16) === 9 && (y % 16) === 9);
+        if (frame) { r = 50; gg = 52; b = 58; } else if (stripe) { r = 160 + n; gg = 30; b = 30; } else if (rivet) { r = 140; gg = 140; b = 150; } else { r = 96 + n * 0.5; gg = 98 + n * 0.5; b = 106 + n * 0.5; }
       } else { // hell flesh
         const v = Math.sin(x * 0.35) * Math.cos(y * 0.28) * 30 + Math.sin((x + y) * 0.9) * 12;
         r = 120 + v + n; gg = 24 + v * 0.3; b = 26 + v * 0.2;
@@ -123,18 +129,19 @@
     const g2 = c2.getContext('2d'); g2.drawImage(c, 0, 0); g2.fillStyle = 'rgba(0,0,0,0.3)'; g2.fillRect(0, 0, TEX, TEX);
     return [c, c2];
   }
-  const textures = [null, makeTexture(1), makeTexture(2), makeTexture(3), makeTexture(4)];
+  const textures = [null, makeTexture(1), makeTexture(2), makeTexture(3), makeTexture(4), makeTexture(5)];
 
   // ---------- pixel-art sprites from text
   const PAL = { B: '#8a4a2a', D: '#4c2410', E: '#ffe040', R: '#d02020', H: '#e8d8b0', C: '#e8d8b0', W: '#ffffff', K: '#111111',
                 G: '#9a9a9a', g: '#5c5c5c', Y: '#e8c030', y: '#a07818', S: '#e0b090', s: '#a07050', M: '#c8c8c8', X: '#ff8020', O: '#ffd040' };
-  function sprite(rows, scale = 1) {
+  function sprite(rows, scale = 1, pal = PAL) {
     const h = rows.length, w = rows[0].length;
     const c = document.createElement('canvas'); c.width = w * scale; c.height = h * scale;
     const g = c.getContext('2d');
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const ch = rows[y][x]; if (PAL[ch]) { g.fillStyle = PAL[ch]; g.fillRect(x * scale, y * scale, scale, scale); } }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const ch = rows[y][x]; if (pal[ch]) { g.fillStyle = pal[ch]; g.fillRect(x * scale, y * scale, scale, scale); } }
     return c;
   }
+  const BRUTE_PAL = Object.assign({}, PAL, { B: '#c85a8a', D: '#6e2448', E: '#ffffff', R: '#3a0a1e', H: '#f0e0c0', S: '#f0b0d0', s: '#a06080' });
   const IMP_STAND = [
     '...H........H...', '..HH........HH..', '...DBBBBBBBBD...', '...BBBBBBBBBB...', '...BEEBBBBEEB...', '...BRRBBBBRRB...',
     '...BBBBBBBBBB...', '....BBDDDDBB....', '....BDRRRRDB....', '.....BBBBBB.....', '..BBBBBBBBBBBB..', '.BBBBBBBBBBBBBB.',
@@ -164,7 +171,17 @@
     '................', '................', '................', '................', '................', '................',
     '................', '................', '................', '....yyyyyyyy....', '...yYYYYYYYYy...', '...yYKKKKKKYy...',
     '...yYYYYYYYYy...', '...yYKKKKKKYy...', '...yYYYYYYYYy...', '....yyyyyyyy....'];
-  const SPR = { stand: sprite(IMP_STAND, 2), attack: sprite(IMP_ATTACK, 2), pain: sprite(IMP_PAIN, 2), dead: sprite(IMP_DEAD, 2), medkit: sprite(MEDKIT, 2), ammo: sprite(AMMO, 2) };
+  const SHELLS = AMMO.map(r => r.replace(/Y/g, 'R').replace(/y/g, 'D').replace(/K/g, 'Y'));
+  const SHOTGUN_ITEM = [
+    '................', '................', '................', '................', '................', '................',
+    '................', '................', '................', '................', '..gggggggggg....', '.gGGGGGGGGGGgg..',
+    '.gGGGGGGGGGGGGg.', '..gggggsssSSSs..', '.......sss.ss...', '................'];
+  const SPR = {
+    imp: { stand: sprite(IMP_STAND, 2), attack: sprite(IMP_ATTACK, 2), pain: sprite(IMP_PAIN, 2), dead: sprite(IMP_DEAD, 2) },
+    brute: { stand: sprite(IMP_STAND, 2, BRUTE_PAL), attack: sprite(IMP_ATTACK, 2, BRUTE_PAL), pain: sprite(IMP_PAIN, 2, BRUTE_PAL), dead: sprite(IMP_DEAD, 2, BRUTE_PAL) },
+    medkit: sprite(MEDKIT, 2), ammo: sprite(AMMO, 2), shells: sprite(SHELLS, 2), shotgun: sprite(SHOTGUN_ITEM, 2),
+  };
+  const KINDS = { imp: { hp: 60, speed: 1.5, dmg: [7, 8], range: 9, scale: 0.9 }, brute: { hp: 150, speed: 2.6, dmg: [14, 12], range: 7, scale: 1.05 } };
 
   const PISTOL = [
     '..........gggg..........', '.........gGGGGg.........', '.........gGGGGg.........', '.........gGGGGg.........',
@@ -174,7 +191,18 @@
     '..sSSSSSSSSSSSSSSSSSSs..', '..ssSSSSSSSSSSSSSSSSss..', '...ssSSSSSSSSSSSSSSss...', '....ssssSSSSSSSSssss....',
     '......ssssssssssss......', '........ssssssss........', '........ssssssss........', '........ssssssss........'];
   const FLASH = ['....XX....', '..XOOOOX..', '.XOOOOOOX.', 'XOOOWWOOOX', 'XOOOWWOOOX', '.XOOOOOOX.', '..XOOOOX..', '....XX....'];
-  const SPR_PISTOL = sprite(PISTOL, 3), SPR_FLASH = sprite(FLASH, 3);
+  const SHOTGUN = [
+    '.........gggggg.........', '........gGGGGGGg........', '........gGGGGGGg........', '........gGGggGGg........',
+    '........gGGggGGg........', '........gGGggGGg........', '........gGGggGGg........', '.......ggGGGGGGgg.......',
+    '......gGGGGGGGGGGg......', '......gGGGGGGGGGGg......', '.....gsssGGGGGGsssg.....', '....SSSSSsGGGGsSSSSS....',
+    '...SSSSSSSsGGsSSSSSSS...', '..SSSSSSSSSssSSSSSSSSS..', '..SSSSSSSSSSSSSSSSSSSS..', '.sSSSSSSSSSSSSSSSSSSSSs.',
+    '.sSSSSSSSSSSSSSSSSSSSSs.', '.ssSSSSSSSSSSSSSSSSSSss.', '..ssSSSSSSSSSSSSSSSSss..', '...ssssSSSSSSSSSSssss...',
+    '.....ssssssssssssss.....', '.......ssssssssss.......', '.......ssssssssss.......', '.......ssssssssss.......'];
+  const SPR_PISTOL = sprite(PISTOL, 3), SPR_SHOTGUN = sprite(SHOTGUN, 3), SPR_FLASH = sprite(FLASH, 3);
+  const WEAPONS = {
+    pistol: { name: 'ПИСТОЛЕТ', img: SPR_PISTOL, ammo: 'ammo', cd: 0.32, dmg: 34, cone: 0.45, pellets: 1, kick: 6 },
+    shotgun: { name: 'ДРОБОВИК', img: SPR_SHOTGUN, ammo: 'shells', cd: 0.9, dmg: 30, cone: 0.22, pellets: 5, kick: 12 },
+  };
 
   // ---------- level
   const MAP_SRC = [
@@ -190,33 +218,43 @@
     '#......#.......#...E...#',
     '###.####...E...####.####',
     '#......#.......#.......#',
-    '#......+.......#..E....#',
+    '#..S...+.......#..E....#',
     '#..E...#.......#.......#',
     '#......##.######.......#',
     '#......#..#....#...M...#',
-    '#..M...#..#..E.#.......#',
-    '####.###..####.####.####',
+    '#..M...#..#..E.#...H...#',
+    '####+###..####.####+####',
     '#......#...........#...#',
-    '#......#.....E.....#.E.#',
-    '#..E...#...........+...#',
-    '#......#.....A.....#...#',
+    '#......#.....B.....#.B.#',
+    '#..B...#.....H.....+...#',
+    '#..H...#.....A.....#...#',
     '#......#...........#...#',
     '########################'];
   const MW = MAP_SRC[0].length, MH = MAP_SRC.length;
   const map = [];
   let start = { x: 1.5, y: 1.5 };
-  const spawnEnemies = [], spawnItems = [];
+  const spawnEnemies = [], spawnItems = [], doorDefs = [];
   for (let y = 0; y < MH; y++) { map.push([]); for (let x = 0; x < MW; x++) {
     const ch = MAP_SRC[y][x];
     let t = 0;
     if (ch === '#') t = x < 8 ? 1 : y >= 17 ? 4 : x >= 16 ? 3 : 2;
+    if (ch === '+') { t = 5; doorDefs.push({ x, y }); }
     map[y].push(t);
     if (ch === 'P') start = { x: x + 0.5, y: y + 0.5 };
-    if (ch === 'E') spawnEnemies.push({ x: x + 0.5, y: y + 0.5 });
+    if (ch === 'E') spawnEnemies.push({ x: x + 0.5, y: y + 0.5, kind: 'imp' });
+    if (ch === 'B') spawnEnemies.push({ x: x + 0.5, y: y + 0.5, kind: 'brute' });
     if (ch === 'M') spawnItems.push({ x: x + 0.5, y: y + 0.5, kind: 'medkit' });
     if (ch === 'A') spawnItems.push({ x: x + 0.5, y: y + 0.5, kind: 'ammo' });
+    if (ch === 'H') spawnItems.push({ x: x + 0.5, y: y + 0.5, kind: 'shells' });
+    if (ch === 'S') spawnItems.push({ x: x + 0.5, y: y + 0.5, kind: 'shotgun' });
   } }
-  const solid = (x, y) => map[Math.floor(y)] === undefined || map[Math.floor(y)][Math.floor(x)] !== 0;
+  let doors = [];
+  const doorAt = (x, y) => doors.find(d => d.x === x && d.y === y);
+  const solid = (x, y) => {
+    const t = map[Math.floor(y)] === undefined ? 1 : map[Math.floor(y)][Math.floor(x)];
+    if (t === 5) { const d = doorAt(Math.floor(x), Math.floor(y)); return !(d && d.open); }
+    return t !== 0;
+  };
 
   // ---------- audio (synth)
   let ac = null;
@@ -229,6 +267,14 @@
       for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.5);
       const src = a.createBufferSource(); src.buffer = buf; const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1800;
       src.connect(f); f.connect(out); out.gain.setValueAtTime(0.5, t); src.start(t);
+    } else if (kind === 'boom') {
+      const len = 0.35, buf = a.createBuffer(1, a.sampleRate * len, a.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.8);
+      const src = a.createBufferSource(); src.buffer = buf; const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 700;
+      src.connect(f); f.connect(out); out.gain.setValueAtTime(0.9, t); src.start(t);
+    } else if (kind === 'door') {
+      const o = a.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(120, t); o.frequency.linearRampToValueAtTime(180, t + 0.25);
+      o.connect(out); out.gain.setValueAtTime(0.12, t); out.gain.exponentialRampToValueAtTime(0.001, t + 0.3); o.start(t); o.stop(t + 0.3);
     } else if (kind === 'hurt') {
       const o = a.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(50, t + 0.25);
       o.connect(out); out.gain.setValueAtTime(0.35, t); out.gain.exponentialRampToValueAtTime(0.001, t + 0.3); o.start(t); o.stop(t + 0.3);
@@ -248,15 +294,17 @@
   }
 
   // ---------- game state
-  const player = { x: 0, y: 0, a: 0, hp: 100, ammo: 40, kills: 0, fireCd: 0, flash: 0, hurt: 0, bob: 0 };
+  const player = { x: 0, y: 0, a: 0, hp: 100, ammo: 40, shells: 0, kills: 0, fireCd: 0, flash: 0, hurt: 0, bob: 0, weapon: 'pistol', hasShotgun: false };
   let enemies = [], items = [], state = 'idle', msg = '', msgT = 0, time = 0, endTime = 0;
   const keys = {};
   const FOV = 0.66;
 
   function reset() {
-    player.x = start.x; player.y = start.y; player.a = 0; player.hp = 100; player.ammo = 40; player.kills = 0; player.fireCd = 0; player.flash = 0; player.hurt = 0;
-    enemies = spawnEnemies.map(s => ({ x: s.x, y: s.y, hp: 60, state: 'idle', t: 0, atkCd: 1 + Math.random(), pain: 0, awake: false, alive: true }));
+    player.x = start.x; player.y = start.y; player.a = 0; player.hp = 100; player.ammo = 40; player.shells = 0; player.kills = 0; player.fireCd = 0; player.flash = 0; player.hurt = 0;
+    player.weapon = 'pistol'; player.hasShotgun = false;
+    enemies = spawnEnemies.map(s => ({ x: s.x, y: s.y, kind: s.kind, hp: KINDS[s.kind].hp, state: 'idle', t: 0, atkCd: 1 + Math.random(), pain: 0, awake: false, alive: true }));
     items = spawnItems.map(s => ({ ...s, taken: false }));
+    doors = doorDefs.map(d => ({ x: d.x, y: d.y, open: false, t: 0 }));
     time = 0; msg = ''; msgT = 0;
   }
   function say(s) { msg = s; msgT = 2.5; }
@@ -290,26 +338,39 @@
     // items
     for (const it of items) if (!it.taken && Math.hypot(it.x - player.x, it.y - player.y) < 0.5) {
       if (it.kind === 'medkit') { if (player.hp >= 100) continue; player.hp = Math.min(100, player.hp + 25); say('Аптечка +25'); }
-      else { player.ammo += 20; say('Патроны +20'); }
+      else if (it.kind === 'ammo') { player.ammo += 20; say('Патроны +20'); }
+      else if (it.kind === 'shells') { player.shells += 8; say('Дробь +8'); }
+      else { player.hasShotgun = true; player.shells += 8; player.weapon = 'shotgun'; say('Дробовик! Клавиши 1/2 — смена оружия'); }
       it.taken = true; sfx('pickup');
     }
+    // doors: open when someone is near, close a few seconds after the cell is clear
+    for (const d of doors) {
+      const cx = d.x + 0.5, cy = d.y + 0.5;
+      let near = Math.hypot(player.x - cx, player.y - cy) < 1.3;
+      if (!near) for (const e of enemies) if (e.alive && e.awake && Math.hypot(e.x - cx, e.y - cy) < 1.0) { near = true; break; }
+      if (near) { if (!d.open) sfx('door'); d.open = true; d.t = 0; }
+      else if (d.open) { d.t += dt; if (d.t > 3) { d.open = false; sfx('door'); } }
+    }
+    if (keys.wantWeapon) { if (keys.wantWeapon === 'pistol' || player.hasShotgun) player.weapon = keys.wantWeapon; keys.wantWeapon = null; }
+    if (keys.swapOnce) { keys.swapOnce = false; if (player.hasShotgun) player.weapon = player.weapon === 'pistol' ? 'shotgun' : 'pistol'; }
     // enemies
     for (const e of enemies) {
       if (!e.alive) continue;
+      const K = KINDS[e.kind];
       e.t += dt; e.pain = Math.max(0, e.pain - dt); e.atkCd = Math.max(0, e.atkCd - dt);
       const ddx = player.x - e.x, ddy = player.y - e.y, dist = Math.hypot(ddx, ddy);
-      if (!e.awake) { if (dist < 9 && lineOfSight(e.x, e.y, player.x, player.y)) { e.awake = true; sfx('growl'); } continue; }
+      if (!e.awake) { if (dist < K.range && lineOfSight(e.x, e.y, player.x, player.y)) { e.awake = true; sfx('growl'); } continue; }
       if (e.pain > 0) { e.state = 'pain'; continue; }
       if (dist < 1.1) {
         e.state = 'attack';
-        if (e.atkCd === 0) { e.atkCd = 1.1; player.hp -= 7 + Math.floor(Math.random() * 8); player.hurt = 0.35; sfx('hurt'); if (player.hp <= 0) die(); }
+        if (e.atkCd === 0) { e.atkCd = 1.1; player.hp -= K.dmg[0] + Math.floor(Math.random() * K.dmg[1]); player.hurt = 0.35; sfx('hurt'); if (player.hp <= 0) die(); }
       } else {
         e.state = 'walk';
         const sees = lineOfSight(e.x, e.y, player.x, player.y);
         if (sees) { e.lastX = player.x; e.lastY = player.y; }
         const tx = e.lastX !== undefined ? e.lastX : player.x, ty = e.lastY !== undefined ? e.lastY : player.y;
         const mx = tx - e.x, my = ty - e.y, md = Math.hypot(mx, my) || 1;
-        if (md > 0.3) moveWithCollision(e, mx / md * 1.5 * dt, my / md * 1.5 * dt, 0.3);
+        if (md > 0.3) moveWithCollision(e, mx / md * K.speed * dt, my / md * K.speed * dt, 0.3);
         // don't stack on other enemies
         for (const o of enemies) if (o !== e && o.alive) { const ox = e.x - o.x, oy = e.y - o.y, od = Math.hypot(ox, oy); if (od < 0.6 && od > 0) moveWithCollision(e, ox / od * 0.6 * dt, oy / od * 0.6 * dt, 0.3); }
       }
@@ -319,21 +380,27 @@
   }
 
   function fire() {
-    if (player.ammo <= 0) { sfx('click'); player.fireCd = 0.3; say('Нет патронов'); return; }
-    player.ammo--; player.fireCd = 0.32; player.flash = 0.08; sfx('shot');
-    // hitscan: nearest enemy near the screen centre with clear line of sight
-    let best = null, bestD = Infinity;
+    const w = WEAPONS[player.weapon];
+    if (player[w.ammo] <= 0) { sfx('click'); player.fireCd = 0.3; say(w.ammo === 'ammo' ? 'Нет патронов' : 'Нет дроби'); return; }
+    player[w.ammo]--; player.fireCd = w.cd; player.flash = 0.08; sfx(player.weapon === 'shotgun' ? 'boom' : 'shot');
+    // hitscan: the pistol hits the nearest enemy near the centre; the shotgun spreads pellets over a wide cone
     const cx = Math.cos(player.a), cy = Math.sin(player.a);
-    for (const e of enemies) {
-      if (!e.alive) continue;
-      const dx = e.x - player.x, dy = e.y - player.y, dist = Math.hypot(dx, dy);
-      const along = dx * cx + dy * cy, side = -dx * cy + dy * cx;
-      if (along <= 0) continue;
-      if (Math.abs(side) < 0.45 && dist < bestD && lineOfSight(player.x, player.y, e.x, e.y)) { best = e; bestD = dist; }
-    }
-    if (best) {
-      best.hp -= 34; best.pain = 0.25; best.awake = true;
-      if (best.hp <= 0) { best.alive = false; best.state = 'dead'; player.kills++; sfx('die'); }
+    const hit = (e, dmg) => { e.hp -= dmg; e.pain = 0.25; e.awake = true; if (e.hp <= 0 && e.alive) { e.alive = false; e.state = 'dead'; player.kills++; sfx('die'); } };
+    const visible = enemies.filter(e => e.alive).map(e => {
+      const dx = e.x - player.x, dy = e.y - player.y;
+      return { e, dist: Math.hypot(dx, dy), along: dx * cx + dy * cy, side: -dx * cy + dy * cx };
+    }).filter(v => v.along > 0 && lineOfSight(player.x, player.y, v.e.x, v.e.y));
+    if (w.pellets === 1) {
+      let best = null;
+      for (const v of visible) if (Math.abs(v.side) < w.cone && (!best || v.dist < best.dist)) best = v;
+      if (best) hit(best.e, w.dmg);
+    } else {
+      for (let i = 0; i < w.pellets; i++) {
+        const off = (i / (w.pellets - 1) - 0.5) * 2 * w.cone; // pellet lateral offset at 1 unit
+        let best = null;
+        for (const v of visible) { const lateral = v.side - off * v.along; if (Math.abs(lateral) < 0.4 && v.dist < 8 && (!best || v.dist < best.dist)) best = v; }
+        if (best) hit(best.e, Math.round(w.dmg * (1 - best.dist / 12)));
+      }
     }
   }
 
@@ -374,6 +441,7 @@
         if (sdX < sdY) { sdX += ddx; mx += stX; side = 0; } else { sdY += ddy; my += stY; side = 1; }
         if (my < 0 || my >= MH || mx < 0 || mx >= MW) { hit = 1; break; }
         hit = map[my][mx];
+        if (hit === 5) { const d = doorAt(mx, my); if (d && d.open) hit = 0; }
       }
       const dist = side === 0 ? sdX - ddx : sdY - ddy;
       zbuf[x] = dist;
@@ -389,7 +457,7 @@
 
     // sprites
     const list = [];
-    for (const e of enemies) list.push({ x: e.x, y: e.y, img: SPR[e.alive ? (e.state === 'attack' ? 'attack' : e.state === 'pain' ? 'pain' : 'stand') : 'dead'], sc: 0.9 });
+    for (const e of enemies) list.push({ x: e.x, y: e.y, img: SPR[e.kind][e.alive ? (e.state === 'attack' ? 'attack' : e.state === 'pain' ? 'pain' : 'stand') : 'dead'], sc: KINDS[e.kind].scale });
     for (const it of items) if (!it.taken) list.push({ x: it.x, y: it.y, img: SPR[it.kind], sc: 0.6 });
     for (const s of list) { s.d = (s.x - player.x) ** 2 + (s.y - player.y) ** 2; }
     list.sort((a, b) => b.d - a.d);
@@ -412,9 +480,10 @@
     }
 
     // weapon
-    const wb = Math.sin(player.bob) * 3, wx = SW / 2 - SPR_PISTOL.width / 2 + Math.cos(player.bob / 2) * 4, wy = VH - SPR_PISTOL.height + 10 + Math.abs(wb) + (player.fireCd > 0.22 ? 6 : 0);
-    if (player.flash > 0) ctx.drawImage(SPR_FLASH, wx + SPR_PISTOL.width / 2 - SPR_FLASH.width / 2, wy - SPR_FLASH.height + 8);
-    ctx.drawImage(SPR_PISTOL, wx, wy);
+    const W = WEAPONS[player.weapon], gun = W.img;
+    const wb = Math.sin(player.bob) * 3, wx = SW / 2 - gun.width / 2 + Math.cos(player.bob / 2) * 4, wy = VH - gun.height + 10 + Math.abs(wb) + (player.fireCd > W.cd - 0.1 ? W.kick : 0);
+    if (player.flash > 0) ctx.drawImage(SPR_FLASH, wx + gun.width / 2 - SPR_FLASH.width / 2, wy - SPR_FLASH.height + 8);
+    ctx.drawImage(gun, wx, wy);
     // crosshair
     ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(SW / 2 - 1, VH / 2 - 4, 2, 3); ctx.fillRect(SW / 2 - 1, VH / 2 + 2, 2, 3); ctx.fillRect(SW / 2 - 4, VH / 2 - 1, 3, 2); ctx.fillRect(SW / 2 + 2, VH / 2 - 1, 3, 2);
     // damage flash
@@ -426,10 +495,12 @@
     ctx.fillStyle = '#4a4a50'; ctx.fillRect(0, VH, SW, 1);
     ctx.font = '10px monospace'; ctx.textBaseline = 'top';
     const stat = (x, label, val, col) => { ctx.fillStyle = '#9a9aa0'; ctx.fillText(label, x, VH + 4); ctx.fillStyle = col; ctx.font = 'bold 16px monospace'; ctx.fillText(val, x, VH + 13); ctx.font = '10px monospace'; };
-    stat(8, 'ЗДОРОВЬЕ', Math.max(0, player.hp) + '%', player.hp > 30 ? '#ffd040' : '#ff4030');
-    stat(100, 'ПАТРОНЫ', String(player.ammo), player.ammo > 0 ? '#ffd040' : '#ff4030');
-    stat(180, 'УБИТО', `${player.kills}/${enemies.length}`, '#ffd040');
-    stat(250, 'ВРЕМЯ', `${Math.floor(time)}`, '#ffd040');
+    stat(6, 'ЗДОРОВЬЕ', Math.max(0, player.hp) + '%', player.hp > 30 ? '#ffd040' : '#ff4030');
+    const cur = WEAPONS[player.weapon];
+    stat(78, cur.name, String(player[cur.ammo]), player[cur.ammo] > 0 ? '#ffd040' : '#ff4030');
+    stat(160, 'ПАТР/ДРОБЬ', `${player.ammo}/${player.hasShotgun ? player.shells : '-'}`, '#c0c0c8');
+    stat(238, 'УБИТО', `${player.kills}/${enemies.length}`, '#ffd040');
+    stat(288, 'ВРЕМЯ', `${Math.floor(time)}`, '#ffd040');
     if (msgT > 0) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, SW, 14); ctx.fillStyle = '#ffe080'; ctx.font = 'bold 11px monospace'; ctx.fillText(msg, 6, 2); }
 
     // minimap
@@ -441,12 +512,15 @@
   }
 
   // ---------- input
-  const KEYMAP = { KeyW: 1, KeyA: 1, KeyS: 1, KeyD: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Space: 1 };
+  const KEYMAP = { KeyW: 1, KeyA: 1, KeyS: 1, KeyD: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Space: 1, Digit1: 1, Digit2: 1 };
   window.addEventListener('keydown', e => {
     if (e.code === 'Escape') { if (state === 'play') pause(); return; }
+    if (e.code === 'KeyQ') { keys.swapOnce = true; return; }
     if (!KEYMAP[e.code]) return;
     e.preventDefault(); keys[e.code] = true;
     if (e.code === 'Space' && !e.repeat) keys.fireOnce = true;
+    if (e.code === 'Digit1') keys.wantWeapon = 'pistol';
+    if (e.code === 'Digit2') keys.wantWeapon = 'shotgun';
   });
   window.addEventListener('keyup', e => { if (KEYMAP[e.code]) keys[e.code] = false; });
   canvas.addEventListener('mousedown', e => {
@@ -467,7 +541,7 @@
   canvas.addEventListener('touchend', () => { lastTouchX = null; });
   document.querySelectorAll('#pad button').forEach(b => {
     const k = b.dataset.k;
-    b.addEventListener('pointerdown', e => { e.preventDefault(); keys[k] = true; if (k === 'fire') keys.fireOnce = true; audio(); b.setPointerCapture && b.setPointerCapture(e.pointerId); });
+    b.addEventListener('pointerdown', e => { e.preventDefault(); keys[k] = true; if (k === 'fire') keys.fireOnce = true; if (k === 'swap') keys.swapOnce = true; audio(); b.setPointerCapture && b.setPointerCapture(e.pointerId); });
     const off = () => { keys[k] = false; };
     b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('pointerleave', off);
   });
@@ -509,10 +583,11 @@
   requestAnimationFrame(frame);
 
   window.__doom = {
-    state: () => ({ state, hp: player.hp, ammo: player.ammo, kills: player.kills, enemies: enemies.length, x: player.x, y: player.y, awake: enemies.filter(e => e.awake).length }),
+    state: () => ({ state, hp: player.hp, ammo: player.ammo, shells: player.shells, weapon: player.weapon, doorsOpen: doors.filter(d => d.open).length, kills: player.kills, enemies: enemies.length, x: player.x, y: player.y, awake: enemies.filter(e => e.awake).length }),
     key: (k, v) => { keys[k] = v; },
     teleport: (x, y, a) => { player.x = x; player.y = y; player.a = a; },
-    enemies: () => enemies.map(e => ({ x: e.x, y: e.y, hp: e.hp, alive: e.alive })),
+    enemies: () => enemies.map(e => ({ x: e.x, y: e.y, hp: e.hp, alive: e.alive, kind: e.kind })),
+    give: () => { player.hasShotgun = true; player.shells = 20; player.weapon = 'shotgun'; },
     killAll: () => { for (const e of enemies) if (e.alive) { e.alive = false; e.state = 'dead'; player.kills++; } },
   };
 })();
